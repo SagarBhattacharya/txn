@@ -14,8 +14,17 @@ pub enum AccountType {
 }
 
 #[derive(Debug, FromRow, PartialEq)]
+pub struct User {
+  pub id: i32,
+  pub username: String,
+  pub password_hash: String,
+  pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow, PartialEq)]
 pub struct Account {
   pub id: i32,
+  pub owner_id: i32,
   pub name: String,
   pub account_type: AccountType,
   pub created_at: DateTime<Utc>,

@@ -10,6 +10,9 @@ pub struct Config {
 
   #[envconfig(from = "SERVER_PORT", default = "8080")]
   pub server_port: u16,
+  
+  #[envconfig(from = "JWT_SECRET_KEY")]
+  pub jwt_secret: String,
 }
 
 impl Config {

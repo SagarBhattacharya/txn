@@ -3,23 +3,86 @@ use crate::db::schemas::*;
 use rust_decimal::Decimal;
 use sqlx::{Executor, Postgres};
 
+pub async fn create_user<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  username: &str,
+  password_hash: &str,
+) -> LedgerResult<Option<User>> {
+  let user = sqlx::query_as!(
+    User,
+    r#"
+    insert into users (username, password_hash)
+    values ($1, $2)
+    on conflict (username) do nothing
+    returning id, username, password_hash, created_at
+    "#,
+    username,
+    password_hash
+  )
+    .fetch_optional(executor)
+    .await?;
+
+  Ok(user)
+}
+
+pub async fn get_user_by_username<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  username: &str,
+) -> LedgerResult<Option<User>> {
+  let user = sqlx::query_as!(
+    User,
+    r#"
+    select id, username, password_hash, created_at
+    from users
+    where username = $1
+    "#,
+    username
+  )
+    .fetch_optional(executor)
+    .await?;
+
+  Ok(user)
+}
+
+pub async fn get_user_by_id<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  id: i32,
+) -> LedgerResult<Option<User>> {
+  let user = sqlx::query_as!(
+    User,
+    r#"
+    select id, username, password_hash, created_at
+    from users
+    where id = $1
+    "#,
+    id
+  )
+    .fetch_optional(executor)
+    .await?;
+
+  Ok(user)
+}
+
 pub async fn create_account<'e>(
   executor: impl Executor<'e, Database = Postgres>,
+  owner_id: i32,
   name: &str,
   atype: AccountType,
-) -> LedgerResult<Account> {
+) -> LedgerResult<Option<Account>> {
   let account = sqlx::query_as!(
     Account,
     r#"
-		insert into accounts (name, account_type)
-		values ($1, $2)
-		returning id, name, created_at, account_type
+		insert into accounts (owner_id, name, account_type)
+		values ($1, $2, $3)
+		on conflict (owner_id, name) do nothing
+		returning id, owner_id, name, created_at, account_type
 		as "account_type: AccountType";
 	"#,
+    owner_id,
     name,
     atype as AccountType
   )
-  .fetch_one(executor)
+  .fetch_optional(executor)
   .await?;
 
   Ok(account)
@@ -32,7 +95,7 @@ pub async fn get_account<'e>(
   let account = sqlx::query_as!(
     Account,
     r#"
-		select id, name, created_at, account_type
+		select id, owner_id, name, created_at, account_type
 		as "account_type:AccountType"
 		from accounts where id = $1
 	"#,
@@ -42,6 +105,25 @@ pub async fn get_account<'e>(
   .await?;
 
   Ok(account)
+}
+
+pub async fn get_accounts_by_owner<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  owner_id: i32,
+) -> LedgerResult<Vec<Account>> {
+  let accounts = sqlx::query_as!(
+    Account,
+    r#"
+    select id, owner_id, name, created_at, account_type
+    as "account_type: AccountType" from accounts
+    where owner_id = $1 order by id
+    "#,
+    owner_id
+  )
+    .fetch_all(executor)
+    .await?;
+
+  Ok(accounts)
 }
 
 pub async fn lock_accounts<'e>(
@@ -178,6 +260,29 @@ pub async fn insert_transaction<'e>(
   .await?;
 
   Ok(txn)
+}
+
+pub async fn is_user_party_to_transaction<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  transaction_id: i32,
+  user_id: i32,
+) -> LedgerResult<bool> {
+  let is_party = sqlx::query_scalar!(
+    r#"
+    select exists (
+      select 1
+      from entries e
+      join accounts a on a.id = e.account_id
+      where e.transaction_id = $1 and a.owner_id = $2
+    ) as "exists!"
+    "#,
+    transaction_id,
+    user_id
+  )
+    .fetch_one(executor)
+    .await?;
+
+  Ok(is_party)
 }
 
 pub async fn get_reversal_by_original_id<'e>(

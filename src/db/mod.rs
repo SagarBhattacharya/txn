@@ -4,7 +4,7 @@ use crate::db::schemas::*;
 use crate::models::draft::{PostingDraft, TransactionDraft};
 use crate::{LedgerError, LedgerResult};
 use rust_decimal::Decimal;
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool, Postgres};
 use sqlx::postgres::PgPoolOptions;
 
 mod queries;
@@ -30,12 +30,41 @@ impl Repo {
     Self { pool }
   }
 
-  pub async fn create_account(&self, name: &str, atype: AccountType) -> LedgerResult<Account> {
-    queries::create_account(&self.pool, name, atype).await
+  pub fn pool(&self) -> &PgPool {
+    &self.pool
+  }
+
+  pub async fn create_user(
+    &self, 
+    username: &str, 
+    password_hash: &str
+  ) -> LedgerResult<Option<User>> {
+    queries::create_user(&self.pool, username, password_hash).await
+  }
+
+  pub async fn get_user_by_username(&self, username: &str) -> LedgerResult<Option<User>> {
+    queries::get_user_by_username(&self.pool, username).await
+  }
+
+  pub async fn get_user_by_id(&self, id: i32) -> LedgerResult<Option<User>> {
+    queries::get_user_by_id(&self.pool, id).await
+  }
+
+  pub async fn create_account(
+    &self,
+    owner_id: i32,
+    name: &str,
+    atype: AccountType,
+  ) -> LedgerResult<Option<Account>> {
+    queries::create_account(&self.pool, owner_id, name, atype).await
   }
 
   pub async fn get_account_by_id(&self, id: i32) -> LedgerResult<Option<Account>> {
     queries::get_account(&self.pool, id).await
+  }
+
+  pub async fn get_accounts_by_owner(&self, owner_id: i32) -> LedgerResult<Vec<Account>> {
+    queries::get_accounts_by_owner(&self.pool, owner_id).await
   }
 
   pub async fn get_account_balance(&self, id: i32) -> LedgerResult<Decimal> {
@@ -44,6 +73,21 @@ impl Repo {
 
   pub async fn get_transaction_by_id(&self, id: i32) -> LedgerResult<Option<Transaction>> {
     queries::get_transaction_by_id(&self.pool, id).await
+  }
+
+  pub async fn get_entries_by_transaction_id(
+    &self, 
+    transaction_id: i32
+  ) -> LedgerResult<Vec<Entry>> {
+    queries::get_entries_by_transaction_id(&self.pool, transaction_id).await
+  }
+
+  pub async fn is_user_party_to_transaction<'e>(
+    &self,
+    transaction_id: i32,
+    user_id: i32,
+  ) -> LedgerResult<bool> {
+    queries::is_user_party_to_transaction(&self.pool, transaction_id, user_id).await
   }
 
   pub async fn record_transaction(&self, draft: TransactionDraft) -> LedgerResult<i32> {
@@ -62,7 +106,14 @@ impl Repo {
     reason: &str,
     idempotency_key: impl Into<String>,
   ) -> LedgerResult<i32> {
+    let key = idempotency_key.into();
     let mut tx = self.pool.begin().await?;
+
+    // 0. Idempotency replay check FIRST
+    if let Some(existing) = queries::get_transaction_by_idempotency_key(&mut *tx, &key).await? {
+      tx.commit().await?;
+      return Ok(existing.id);
+    }
 
     // 1. Target transaction must exist
     let target_txn = queries::get_transaction_by_id(&mut *tx, target_txn_id)
@@ -74,7 +125,7 @@ impl Repo {
       return Err(LedgerError::CannotReverseReversal(target_txn_id));
     }
 
-    // 3. Target must not already have been reversed
+    // 3. Target must not already have been reversed by another transaction
     if queries::get_reversal_by_original_id(&mut *tx, target_txn_id)
       .await?
       .is_some()
@@ -92,7 +143,7 @@ impl Repo {
       .collect::<LedgerResult<Vec<_>>>()?;
 
     let desc = format!("Reversal of Txn #{target_txn_id}: {reason}");
-    let draft = TransactionDraft::new(desc, idempotency_key, inverted_postings)?;
+    let draft = TransactionDraft::new(desc, key, inverted_postings)?;
 
     // 6. Record reversal under locks & commit
     let mut recorder = TransactionRecorder::new(tx);

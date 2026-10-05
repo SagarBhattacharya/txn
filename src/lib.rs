@@ -5,11 +5,13 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::Error;
 use thiserror::Error;
+use validator::{ValidationErrors};
 
 pub mod api;
 pub mod config;
 pub mod db;
 pub mod models;
+pub mod auth;
 
 pub type LedgerResult<T> = Result<T, LedgerError>;
 
@@ -78,11 +80,15 @@ impl From<envconfig::Error> for LedgerError {
   }
 }
 
+#[derive(Debug)]
 pub enum ApiError {
   BadRequest(String),
   NotFound(String),
   UnprocessableEntity(String),
   InternalServerError,
+  Unauthorized(String),
+  Conflict(String),
+  Forbidden(String),
 }
 
 impl From<LedgerError> for ApiError {
@@ -109,6 +115,12 @@ impl From<LedgerError> for ApiError {
   }
 }
 
+impl From<ValidationErrors> for ApiError {
+  fn from(err: ValidationErrors) -> Self {
+    Self::BadRequest(err.to_string())
+  }
+}
+
 impl IntoResponse for ApiError {
   fn into_response(self) -> Response {
     let (status, message) = match self {
@@ -119,11 +131,14 @@ impl IntoResponse for ApiError {
         StatusCode::INTERNAL_SERVER_ERROR,
         "Internal server error".to_string(),
       ),
+      ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+      ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+      ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
     };
 
     let body = Json(json!({
-        "error": message,
-        "status": status.as_u16(),
+      "error": message,
+      "status": status.as_u16(),
     }));
 
     (status, body).into_response()
