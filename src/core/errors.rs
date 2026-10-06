@@ -127,7 +127,10 @@ impl IntoResponse for Error {
 
     // 500 errors log details internally and emit generic messages to users
     let message = if status == StatusCode::INTERNAL_SERVER_ERROR {
-      // TODO: tracing::error!(error = ?self, "internal failure");
+      tracing::error!(
+        error = ?self,
+        "unhandled internal server error during request execution"
+      );
       "Internal server error".to_string()
     } else {
       self.to_string()

@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use metrics_exporter_prometheus::PrometheusHandle;
 use tower::ServiceExt;
 use txn::app::auth::{JwtKeys, hash_password};
 use txn::app::{AppState, router};
@@ -34,7 +35,8 @@ impl TestHarness {
     let jwt = Arc::new(JwtKeys::new(test_secret));
 
     let state = AppState::new(pool.clone(), jwt.clone());
-    let app = router(state);
+    let prometheus = txn::app::setup_metrics();
+    let app = router(state, prometheus);
 
     // 1. Seed a default test user directly into DB
     let username = format!("user_{}", &Uuid::new_v4().to_string()[..8]);

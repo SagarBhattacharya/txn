@@ -25,6 +25,17 @@ pub async fn owned_account(
   Ok(account)
 }
 
+#[tracing::instrument(
+  name = "ledger.transfer",
+  skip(pool, cmd),
+  fields(
+    user_id = %user,
+    idempotency_key = %key.as_str(),
+    from = cmd.source_account_id,
+    to = cmd.destination_account_id
+  ),
+  err
+)]
 pub async fn transfer(
   pool: &PgPool,
   user: UserId,
@@ -56,9 +67,21 @@ pub async fn transfer(
 
   let id = post(&mut tx, header, entries).await?;
   tx.commit().await?;
+
+  metrics::counter!("ledger_transfers_total").increment(1);
   Ok(id)
 }
 
+#[tracing::instrument(
+  name = "ledger.reverse",
+  skip(pool, cmd),
+  fields(
+    user_id = %user,
+    idempotency_key = %key.as_str(),
+    target_txn = cmd.target
+  ),
+  err
+)]
 pub async fn reverse(
   pool: &PgPool,
   user: UserId,
@@ -103,6 +126,8 @@ pub async fn reverse(
   let inverted_entries = Entries::inverse_of(&entries)?;
   let id = post(&mut tx, header, inverted_entries).await?;
   tx.commit().await?;
+
+  metrics::counter!("ledger_reversals_total").increment(1);
   Ok(id)
 }
 
@@ -134,6 +159,7 @@ async fn begin_idempotent(
   match Query::get_transaction_by_user_and_key(&mut *tx, user, key.as_str()).await? {
     None => Ok(Begin::Fresh(tx)),
     Some(prev) if fp.matches(&prev.request_hash) => {
+      metrics::counter!("ledger_idempotent_replays_total").increment(1);
       tx.commit().await?;
       Ok(Begin::Replay(prev.id))
     }
@@ -190,6 +216,7 @@ fn check_accounts_and_overdraft(
         .unwrap_or(Decimal::ZERO);
 
       if current + e.amount < Decimal::ZERO {
+        metrics::counter!("ledger_insufficient_funds_total").increment(1);
         return Err(Error::InsufficientFunds {
           account_id: e.account_id,
           required: -e.amount,
