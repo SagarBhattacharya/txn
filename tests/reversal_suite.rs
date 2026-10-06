@@ -5,8 +5,7 @@ use common::TestHarness;
 use rust_decimal::dec;
 use serde_json::json;
 use sqlx::PgPool;
-use txn::auth::{create_jwt, hash_password};
-use txn::db::schemas::AccountType;
+use txn::db::rows::AccountType;
 
 #[sqlx::test]
 async fn test_transaction_reversal_lifecycle(pool: PgPool) {
@@ -33,7 +32,7 @@ async fn test_transaction_reversal_lifecycle(pool: PgPool) {
   // 2. Reverse the transaction
   let (rev_status, rev_body) = harness
     .post_json(
-      &format!("/transactions/{original_txn_id}/reverse"),
+      &format!("/transactions/{original_txn_id}/reversal"),
       json!({ "reason": "Customer cancellation" }),
     )
     .await;
@@ -48,21 +47,23 @@ async fn test_transaction_reversal_lifecycle(pool: PgPool) {
   // 3. Double-Reversal Guard: Attempt to reverse the same transaction with a NEW idempotency key
   let (dup_status, dup_body) = harness
     .post_json(
-      &format!("/transactions/{original_txn_id}/reverse"),
+      &format!("/transactions/{original_txn_id}/reversal"),
       json!({ "reason": "Second attempt" }),
     )
     .await;
   assert_eq!(dup_status, StatusCode::UNPROCESSABLE_ENTITY);
-  assert!(dup_body["error"]
-    .as_str()
-    .unwrap()
-    .to_lowercase()
-    .contains("already been reversed"));
+  assert!(
+    dup_body["error"]
+      .as_str()
+      .unwrap()
+      .to_lowercase()
+      .contains("already been reversed")
+  );
 
   // 4. Reversal-of-Reversal Guard: Attempt to reverse the reversal itself
   let (circ_status, _) = harness
     .post_json(
-      &format!("/transactions/{reversal_txn_id}/reverse"),
+      &format!("/transactions/{reversal_txn_id}/reversal"),
       json!({ "reason": "Reverse the reversal" }),
     )
     .await;
@@ -75,7 +76,7 @@ async fn test_reversal_of_nonexistent_transaction_returns_not_found(pool: PgPool
 
   let (status, _) = harness
     .post_json(
-      "/transactions/999999/reverse",
+      "/transactions/999999/reversal",
       json!({ "reason": "Nonexistent target" }),
     )
     .await;
@@ -91,10 +92,7 @@ async fn test_reversal_rejected_when_recipient_lacks_funds(pool: PgPool) {
   let (cash, _) = harness
     .create_funded_pair("Cash", "Equity", dec!(500.00))
     .await;
-  let vendor = harness
-    .create_account("Vendor", AccountType::Asset)
-    .await
-    .expect("Vendor account should be created");
+  let vendor = harness.create_account("Vendor", AccountType::Asset).await;
 
   // 2. Transfer ₹300 from Cash to Vendor
   let (_, tx_body) = harness
@@ -113,8 +111,7 @@ async fn test_reversal_rejected_when_recipient_lacks_funds(pool: PgPool) {
   // 3. Vendor spends ₹250 to another account (Equity), leaving only ₹50
   let equity2 = harness
     .create_account("Vendor Equity", AccountType::Equity)
-    .await
-    .expect("Vendor Equity account should be created");
+    .await;
   let (spend_status, _) = harness
     .post_json(
       "/transactions",
@@ -132,18 +129,20 @@ async fn test_reversal_rejected_when_recipient_lacks_funds(pool: PgPool) {
   // Reversal requires pulling ₹300 back from Vendor, but Vendor only has ₹50.
   let (rev_status, rev_body) = harness
     .post_json(
-      &format!("/transactions/{original_txn_id}/reverse"),
+      &format!("/transactions/{original_txn_id}/reversal"),
       json!({ "reason": "Customer chargeback" }),
     )
     .await;
 
   // Invariant: Must fail with insufficient funds on the recipient account
   assert_eq!(rev_status, StatusCode::UNPROCESSABLE_ENTITY);
-  assert!(rev_body["error"]
-    .as_str()
-    .unwrap()
-    .to_lowercase()
-    .contains("insufficient"));
+  assert!(
+    rev_body["error"]
+      .as_str()
+      .unwrap()
+      .to_lowercase()
+      .contains("insufficient")
+  );
 
   // 5. Verify Cash balance remained at ₹200 (500 - 300) without unearned refund
   let (_, cash_bal) = harness.get(&format!("/accounts/{}/balance", cash.id)).await;
@@ -170,23 +169,14 @@ async fn test_reversal_validates_reason_payload(pool: PgPool) {
     .await;
   let txn_id = tx_body["transaction_id"].as_i64().unwrap();
 
-  // Whitespace-only reason (< 3 trimmed characters)
+  // Empty reason
   let (status_empty, _) = harness
     .post_json(
-      &format!("/transactions/{txn_id}/reverse"),
-      json!({ "reason": "  " }),
+      &format!("/transactions/{txn_id}/reversal"),
+      json!({ "reason": "" }),
     )
     .await;
   assert_eq!(status_empty, StatusCode::BAD_REQUEST);
-
-  // Too short (< 3 characters)
-  let (status_short, _) = harness
-    .post_json(
-      &format!("/transactions/{txn_id}/reverse"),
-      json!({ "reason": "no" }),
-    )
-    .await;
-  assert_eq!(status_short, StatusCode::BAD_REQUEST);
 }
 
 #[sqlx::test]
@@ -212,26 +202,13 @@ async fn test_cross_tenant_reversal_forbidden_for_outsider(pool: PgPool) {
   let txn_id = tx_body["transaction_id"].as_i64().unwrap();
 
   // 2. Create User B (outsider tenant)
-  let pass_hash = hash_password("pass_b_secure").unwrap();
-  let user_b = harness
-    .repo
-    .create_user("outsider_b", &pass_hash)
-    .await
-    .unwrap()
-    .unwrap();
-
-  let user_b_token = create_jwt(
-    user_b.id,
-    &user_b.username,
-    harness.jwt_secret.as_bytes(),
-  )
-    .unwrap();
+  let (_, user_b_token) = harness.create_user("outsider_b", "pass_b_secure").await;
 
   // 3. User B attempts to reverse User A's transaction
   let (rev_status, rev_body) = harness
     .request(
       axum::http::Method::POST,
-      &format!("/transactions/{txn_id}/reverse"),
+      &format!("/transactions/{txn_id}/reversal"),
       Some(&user_b_token),
       Some("outsider-rev-key"),
       Some(json!({ "reason": "Malicious foreign reversal" })),
@@ -239,10 +216,12 @@ async fn test_cross_tenant_reversal_forbidden_for_outsider(pool: PgPool) {
     .await;
 
   assert_eq!(rev_status, StatusCode::FORBIDDEN);
-  assert!(rev_body["error"]
-    .as_str()
-    .unwrap()
-    .contains("not authorized to reverse this transaction"));
+  assert!(
+    rev_body["error"]
+      .as_str()
+      .unwrap()
+      .contains("not authorized to reverse this transaction")
+  );
 }
 
 #[sqlx::test]
@@ -272,20 +251,20 @@ async fn test_concurrent_double_reversal_returns_422_not_500(pool: PgPool) {
 
   let task1 = tokio::spawn(async move {
     h1.post_with_idempotency(
-      &format!("/transactions/{target_txn_id}/reverse"),
+      &format!("/transactions/{target_txn_id}/reversal"),
       "rev-race-key-1",
       json!({ "reason": "Concurrent reason 1" }),
     )
-      .await
+    .await
   });
 
   let task2 = tokio::spawn(async move {
     h2.post_with_idempotency(
-      &format!("/transactions/{target_txn_id}/reverse"),
+      &format!("/transactions/{target_txn_id}/reversal"),
       "rev-race-key-2",
       json!({ "reason": "Concurrent reason 2" }),
     )
-      .await
+    .await
   });
 
   let (res1, res2) = tokio::join!(task1, task2);

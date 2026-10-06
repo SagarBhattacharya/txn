@@ -23,7 +23,7 @@ create table if not exists transactions (
     id serial primary key,
     user_id integer not null references users(id) on delete restrict,
     description text not null,
-    idempotency_key varchar(128),
+    idempotency_key varchar(128) not null,
     request_hash bytea not null,
     reversed_transaction_id integer references transactions(id) on delete restrict,
     created_at timestamptz not null default now(),
@@ -49,7 +49,7 @@ create index idx_entries_transaction_id on entries(transaction_id);
 create or replace function prevent_modification_ledger_audit()
     returns trigger as $$
 begin
-    raise exception 'ledger records are immutable: % on table % is prohibited', tg_op, tg_table_name;
+    raise exception 'db records are immutable: % on table % is prohibited', tg_op, tg_table_name;
 end;
 $$ language plpgsql;
 

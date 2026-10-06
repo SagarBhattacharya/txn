@@ -1,13 +1,12 @@
-// tests/idempotency_suite.rs
 mod common;
 
-use std::sync::Arc;
 use axum::http::StatusCode;
 use common::TestHarness;
 use rust_decimal::dec;
 use serde_json::json;
 use sqlx::PgPool;
-use txn::db::schemas::AccountType;
+use std::sync::Arc;
+use txn::db::rows::AccountType;
 
 #[sqlx::test]
 async fn test_idempotent_replay_returns_cached_transaction(pool: PgPool) {
@@ -131,7 +130,7 @@ async fn test_reversal_idempotent_replay_returns_cached_transaction(pool: PgPool
   // 2. First reversal attempt
   let (rev_status1, rev_body1) = harness
     .post_with_idempotency(
-      &format!("/transactions/{orig_txn_id}/reverse"),
+      &format!("/transactions/{orig_txn_id}/reversal"),
       rev_idempotency_key,
       rev_payload.clone(),
     )
@@ -143,7 +142,7 @@ async fn test_reversal_idempotent_replay_returns_cached_transaction(pool: PgPool
   // 3. Second reversal attempt: same key and payload
   let (rev_status2, rev_body2) = harness
     .post_with_idempotency(
-      &format!("/transactions/{orig_txn_id}/reverse"),
+      &format!("/transactions/{orig_txn_id}/reversal"),
       rev_idempotency_key,
       rev_payload,
     )
@@ -210,7 +209,7 @@ async fn test_reusing_key_with_different_payload_fails(pool: PgPool) {
 async fn test_different_users_can_use_same_idempotency_key(pool: PgPool) {
   let harness = TestHarness::new(pool).await;
 
-  // User A transaction with key "common-key"
+  // User A transaction with key "core-key"
   let (cash_a, eq_a) = harness
     .create_funded_pair("Cash A", "Equity A", dec!(300.00))
     .await;
@@ -218,7 +217,7 @@ async fn test_different_users_can_use_same_idempotency_key(pool: PgPool) {
   let (status_a, body_a) = harness
     .post_with_idempotency(
       "/transactions",
-      "common-key",
+      "core-key",
       json!({
         "source_account_id": cash_a.id,
         "destination_account_id": eq_a.id,
@@ -231,38 +230,36 @@ async fn test_different_users_can_use_same_idempotency_key(pool: PgPool) {
   let txn_a_id = body_a["transaction_id"].as_i64().unwrap();
 
   // Create User B
-  let pass_hash = txn::auth::hash_password("pass_user_b").unwrap();
-  let user_b = harness
-    .repo
-    .create_user("user_b_idemp", &pass_hash)
-    .await
-    .unwrap()
-    .unwrap();
-  let user_b_token = txn::auth::create_jwt(user_b.id, &user_b.username, harness.jwt_secret.as_bytes()).unwrap();
+  let (user_b, user_b_token) = harness.create_user("user_b_idemp", "pass_user_b").await;
 
-  let cash_b = harness.create_account_for_user(user_b.id, "Cash B", AccountType::Asset).await.unwrap();
-  let eq_b = harness.create_account_for_user(user_b.id, "Equity B", AccountType::Equity).await.unwrap();
+  let cash_b = harness
+    .create_account_for_user(user_b.id, "Cash B", AccountType::Asset)
+    .await;
+  let eq_b = harness
+    .create_account_for_user(user_b.id, "Equity B", AccountType::Equity)
+    .await;
 
   // Seed User B cash directly
-  let seed_draft = txn::models::draft::TransactionDraft::new(
-    user_b.id,
-    "Seed B",
-    "seed-key-b",
-    vec![0],
-    vec![
-      txn::models::draft::PostingDraft::new(cash_b.id, dec!(300.00)).unwrap(),
-      txn::models::draft::PostingDraft::new(eq_b.id, dec!(-300.00)).unwrap(),
-    ],
-  ).unwrap();
-  harness.repo.record_transaction(seed_draft).await.unwrap();
+  let seed_key = txn::core::types::IdempotencyKey::try_from("seed-key-b".to_string()).unwrap();
+  let seed_amt = txn::core::types::Amount::try_from(dec!(300.00)).unwrap();
+  let seed_desc = txn::core::types::Note::try_from("Seed B".to_string()).unwrap();
+  let cmd = txn::core::types::TransferCmd {
+    source_account_id: eq_b.id,
+    destination_account_id: cash_b.id,
+    amount: seed_amt,
+    description: seed_desc,
+  };
+  txn::core::ledger::transfer(&harness.pool, user_b.id, &seed_key, &cmd)
+    .await
+    .unwrap();
 
-  // User B submits WITH THE EXACT SAME KEY "common-key"
+  // User B submits WITH THE EXACT SAME KEY "core-key"
   let (status_b, body_b) = harness
     .request(
       axum::http::Method::POST,
       "/transactions",
       Some(&user_b_token),
-      Some("common-key"),
+      Some("core-key"),
       Some(json!({
         "source_account_id": cash_b.id,
         "destination_account_id": eq_b.id,
