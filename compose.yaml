@@ -4,29 +4,59 @@ services:
     container_name: txn-pg
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ledger_user
-      POSTGRES_PASSWORD: ledger_secret
-      POSTGRES_DB: ledger_db
+      POSTGRES_USER: ${POSTGRES_USER:-ledger_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledger_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ledger_db}
     ports:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledger_user -d ledger_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledger_user} -d ${POSTGRES_DB:-ledger_db}"]
       interval: 3s
       timeout: 3s
       retries: 5
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: txn-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ledger_user}:${POSTGRES_PASSWORD:-ledger_secret}@postgres:5432/${POSTGRES_DB:-ledger_db}
+      SERVER_PORT: "8000"
+      MAX_DB_CONNECTIONS: "10"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-7MZ4hse4tkPrEpcQo2zzFvWPtHmRxDdmIIASHTC0SY2}
+      RUST_LOG: "info,txn=debug,tower_http=info"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   prometheus:
-    image: prom/prometheus:0.15
+    image: prom/prometheus:v2.51.0
     container_name: txn-prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+  appsmith:
+    image: appsmith/appsmith-ce:latest
+    container_name: txn-appsmith
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - appsmith_data:/appsmith/data
+    depends_on:
+      - backend
 
 volumes:
   pg_data:
+  appsmith_data:

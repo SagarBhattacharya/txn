@@ -6,6 +6,7 @@ use rust_decimal::dec;
 use serde_json::json;
 use sqlx::PgPool;
 use std::sync::Arc;
+use tokio::task::JoinSet;
 use txn::db::rows::AccountType;
 
 #[sqlx::test]
@@ -64,22 +65,20 @@ async fn test_concurrent_identical_requests_execute_exactly_once(pool: PgPool) {
 
   let shared_idempotency_key = "idemp-race-token-uuid-999";
   let num_tasks = 10;
-  let mut handles = Vec::new();
+  let mut handles = JoinSet::new();
 
   // Fire 10 parallel requests with the identical idempotency key
   for _ in 0..num_tasks {
     let h = Arc::clone(&harness);
     let p = payload.clone();
-    handles.push(tokio::spawn(async move {
+    handles.spawn(async move {
       h.post_with_idempotency("/transactions", shared_idempotency_key, p)
         .await
-    }));
+    });
   }
 
-  let results = futures::future::join_all(handles).await;
-
   let mut returned_ids = Vec::new();
-  for res in results {
+  while let Some(res) = handles.join_next().await {
     let (status, body) = res.expect("Task panicked");
     assert!(
       status == StatusCode::CREATED || status == StatusCode::OK,

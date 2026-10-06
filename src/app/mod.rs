@@ -93,8 +93,8 @@ pub fn router(state: AppState, prometheus: PrometheusHandle) -> Router {
 }
 
 pub async fn serve(state: AppState, port: u16, prometheus: PrometheusHandle) -> AppResult<()> {
-  let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-  let listener = tokio::net::TcpListener::bind(addr)
+  let addr = format!("0.0.0.0:{}", port);
+  let listener = tokio::net::TcpListener::bind(&addr)
     .await
     .map_err(|e| Error::Internal(e.to_string()))?;
 
