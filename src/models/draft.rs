@@ -20,15 +20,19 @@ impl PostingDraft {
 
 #[derive(Debug, PartialEq)]
 pub struct TransactionDraft {
+  pub user_id: i32,
   pub description: String,
   pub idempotency_key: String,
+  pub request_hash: Vec<u8>,
   pub postings: Vec<PostingDraft>,
 }
 
 impl TransactionDraft {
   pub fn new(
+    user_id: i32,
     description: impl Into<String>,
     idempotency_key: impl Into<String>,
+    request_hash: Vec<u8>,
     postings: Vec<PostingDraft>,
   ) -> LedgerResult<Self> {
     let len = postings.len() as i32;
@@ -54,6 +58,8 @@ impl TransactionDraft {
       description: description.into(),
       idempotency_key: idempotency_key.into(),
       postings,
+      request_hash,
+      user_id
     })
   }
 }

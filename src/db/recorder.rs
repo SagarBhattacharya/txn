@@ -20,71 +20,28 @@ impl<'c> TransactionRecorder<'c> {
     }
   }
 
-  pub async fn record(&mut self, draft: TransactionDraft) -> LedgerResult<i32> {
-    // 1. Short-circuit if idempotency key exists
-    if let Some(existing) =
-      queries::get_transaction_by_idempotency_key(&mut *self.tx, &draft.idempotency_key).await?
-    {
-      return Ok(existing.id);
-    }
-
-    // 2. Lock accounts in deterministic order
-    let account_ids: Vec<i32> = draft.postings.iter().map(|p| p.account_id).collect();
-    self.lock_and_verify_accounts(&account_ids).await?;
-
-    // 3. Check overdraft thresholds on debited asset accounts
-    self.verify_posting_thresholds(&draft.postings).await?;
-
-    // 4. Insert transaction parent header
-    let maybe_txn =
-      queries::insert_transaction(&mut *self.tx, &draft.description, &draft.idempotency_key)
-        .await?;
-
-    let txn_id = match maybe_txn {
-      Some(txn) => {
-        let amounts: Vec<Decimal> = draft.postings.iter().map(|p| p.amount).collect();
-        queries::insert_entries_batch(&mut *self.tx, txn.id, &account_ids, &amounts).await?;
-        txn.id
-      }
-      None => {
-        let existing =
-          queries::get_transaction_by_idempotency_key(&mut *self.tx, &draft.idempotency_key)
-            .await?
-            .expect("Transaction must exist on conflict");
-        existing.id
-      }
-    };
-
-    Ok(txn_id)
-  }
-
-  pub async fn record_reversal(
+  /// Unified entrypoint for both forward transactions and reversals
+  pub async fn record(
     &mut self,
     draft: TransactionDraft,
-    target_txn_id: i32,
+    reversed_target_id: Option<i32>,
   ) -> LedgerResult<i32> {
-    // 1. Short-circuit if idempotency key exists
-    if let Some(existing) =
-      queries::get_transaction_by_idempotency_key(&mut *self.tx, &draft.idempotency_key).await?
-    {
-      return Ok(existing.id);
-    }
-
-    // 2. Lock accounts involved in the reversal (ascending order)
+    // 1. Lock accounts involved in ascending order (deadlock-free)
     let account_ids: Vec<i32> = draft.postings.iter().map(|p| p.account_id).collect();
     self.lock_and_verify_accounts(&account_ids).await?;
 
-    // 3. Verify liquidity/overdraft rules: the party losing funds must actually have enough balance!
+    // 2. Enforce liquidity / overdraft invariants
     self.verify_posting_thresholds(&draft.postings).await?;
 
-    // 4. Insert transaction with reversed_transaction_id linked
-    let maybe_txn = queries::insert_reversal_transaction(
+    // 3. Insert transaction record
+    let maybe_txn = queries::insert_transaction(
       &mut *self.tx,
+      draft.user_id,
       &draft.description,
       &draft.idempotency_key,
-      target_txn_id,
-    )
-    .await?;
+      &draft.request_hash,
+      reversed_target_id,
+    ).await?;
 
     let txn_id = match maybe_txn {
       Some(txn) => {
@@ -93,10 +50,13 @@ impl<'c> TransactionRecorder<'c> {
         txn.id
       }
       None => {
-        let existing =
-          queries::get_transaction_by_idempotency_key(&mut *self.tx, &draft.idempotency_key)
-            .await?
-            .expect("Transaction must exist on conflict");
+        // Fallback on race conflict if not caught by advisory locks
+        let existing = queries::get_transaction_by_user_and_key(
+          &mut *self.tx, draft.user_id, &draft.idempotency_key
+        )
+          .await?
+          .ok_or_else(|| LedgerError::DatabaseError("Row Not Found".into()))?;
+        
         existing.id
       }
     };

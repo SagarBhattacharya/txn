@@ -52,6 +52,9 @@ pub enum LedgerError {
   #[error("Transaction #{0} is itself a reversal and cannot be reversed")]
   CannotReverseReversal(i32),
 
+  #[error("Idempotency key replayed with mismatched request payload")]
+  IdempotencyPayloadMismatch,
+
   #[error("database error: {0}")]
   DatabaseError(String),
 
@@ -102,7 +105,9 @@ impl From<LedgerError> for ApiError {
       LedgerError::AccountNotFound(_) | LedgerError::TransactionNotFound(_) => {
         ApiError::NotFound(err.to_string())
       }
-      LedgerError::InsufficientFunds { .. } | LedgerError::AlreadyReversed(_) => {
+      LedgerError::InsufficientFunds { .. } | 
+      LedgerError::AlreadyReversed(_) | 
+      LedgerError::IdempotencyPayloadMismatch => {
         ApiError::UnprocessableEntity(err.to_string())
       }
       LedgerError::DatabaseError(err)

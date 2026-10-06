@@ -21,13 +21,19 @@ create index idx_accounts_owner_id on accounts(owner_id);
 
 create table if not exists transactions (
     id serial primary key,
+    user_id integer not null references users(id) on delete restrict,
     description text not null,
-    idempotency_key varchar(128) unique,
-    reversed_transaction_id integer unique references transactions(id) on delete restrict,
-    created_at timestamptz not null default now()
+    idempotency_key varchar(128),
+    request_hash bytea not null,
+    reversed_transaction_id integer references transactions(id) on delete restrict,
+    created_at timestamptz not null default now(),
+
+    constraint uq_transactions_user_key unique (user_id, idempotency_key),
+    constraint uq_transactions_single_reversal unique (reversed_transaction_id)
 );
 
 create index idx_transactions_reversed_id on transactions(reversed_transaction_id);
+create index idx_transactions_user_id on transactions(user_id);
 
 create table entries (
     id serial primary key,

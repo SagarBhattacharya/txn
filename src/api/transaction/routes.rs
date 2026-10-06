@@ -9,6 +9,7 @@ use crate::api::AppState;
 use crate::auth::middleware::AuthUser;
 use crate::models::draft::{PostingDraft, TransactionDraft};
 use crate::{ApiError, LedgerError, LedgerResult};
+use crate::models::payload_fg::compute_transfer_hash;
 
 pub async fn transfer_funds(
   user: AuthUser,
@@ -48,7 +49,7 @@ pub async fn transfer_funds(
 
   // 3. Execution: Idempotency check & zero-sum ledger recording
   let idempotency_key = extract_idempotency_key(&headers)?;
-  let draft = TransactionDraft::from_transfer(payload, idempotency_key)?;
+  let draft = TransactionDraft::from_transfer(user.id, payload, idempotency_key)?;
   let txn_id = state.repo.record_transaction(draft).await?;
 
   Ok((
@@ -85,7 +86,7 @@ pub async fn reverse_transaction(
   let idempotency_key = extract_idempotency_key(&headers)?;
   let txn_id = state
     .repo
-    .reverse_transaction(id, payload.reason.trim(), idempotency_key)
+    .reverse_transaction(user.id, id, payload.reason.trim(), idempotency_key)
     .await?;
 
   Ok((
@@ -97,15 +98,32 @@ pub async fn reverse_transaction(
 }
 
 impl TransactionDraft {
-  fn from_transfer(req: TransferRequest, key: String) -> LedgerResult<Self> {
+  pub fn from_transfer(
+    user_id: i32,
+    req: TransferRequest,
+    key: String,
+  ) -> LedgerResult<Self> {
     if req.amount <= Decimal::ZERO {
       return Err(LedgerError::ZeroAmountPosting);
     }
 
+    let request_hash = compute_transfer_hash(
+      req.source_account_id,
+      req.destination_account_id,
+      req.amount,
+      &req.description,
+    );
+
     let source_posting = PostingDraft::new(req.source_account_id, -req.amount)?;
     let dest_posting = PostingDraft::new(req.destination_account_id, req.amount)?;
 
-    TransactionDraft::new(req.description, key, vec![source_posting, dest_posting])
+    TransactionDraft::new(
+      user_id,
+      req.description.trim(),
+      key,
+      request_hash,
+      vec![source_posting, dest_posting],
+    )
   }
 }
 

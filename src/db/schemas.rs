@@ -33,8 +33,10 @@ pub struct Account {
 #[derive(Debug, FromRow, PartialEq)]
 pub struct Transaction {
   pub id: i32,
+  pub user_id: i32,
   pub description: String,
   pub idempotency_key: Option<String>,
+  pub request_hash: Vec<u8>,
   pub reversed_transaction_id: Option<i32>,
   pub created_at: DateTime<Utc>,
 }

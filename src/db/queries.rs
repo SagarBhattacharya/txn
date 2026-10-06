@@ -187,26 +187,30 @@ pub async fn insert_entries_batch<'e>(
   Ok(())
 }
 
-pub async fn get_transaction_by_idempotency_key<'e>(
+pub async fn get_transaction_by_user_and_key<'e>(
   executor: impl Executor<'e, Database = Postgres>,
-  idempotency_key: &str,
+  user_id: i32,
+  key: &str,
 ) -> LedgerResult<Option<Transaction>> {
   let txn = sqlx::query_as!(
     Transaction,
     r#"
-		select
-			id,
-			description,
-			idempotency_key,
-			reversed_transaction_id,
-			created_at
-		from transactions
-		where idempotency_key = $1
-		"#,
-    idempotency_key
+    select
+        id,
+        user_id,
+        description,
+        idempotency_key,
+        request_hash,
+        reversed_transaction_id,
+        created_at
+    from transactions
+    where user_id = $1 AND idempotency_key = $2
+    "#,
+    user_id,
+    key
   )
-  .fetch_optional(executor)
-  .await?;
+    .fetch_optional(executor)
+    .await?;
 
   Ok(txn)
 }
@@ -220,8 +224,10 @@ pub async fn get_transaction_by_id<'e>(
     r#"
 		select
 			id,
+			user_id,
 			description,
 			idempotency_key,
+			request_hash,
 			reversed_transaction_id,
 			created_at
 		from transactions
@@ -237,29 +243,47 @@ pub async fn get_transaction_by_id<'e>(
 
 pub async fn insert_transaction<'e>(
   executor: impl Executor<'e, Database = Postgres>,
+  user_id: i32,
   description: &str,
   idempotency_key: &str,
+  request_hash: &[u8],
+  reversed_transaction_id: Option<i32>,
 ) -> LedgerResult<Option<Transaction>> {
   let txn = sqlx::query_as!(
     Transaction,
     r#"
-		insert into transactions (description, idempotency_key)
-		values ($1, $2)
-		on conflict (idempotency_key) do nothing
-		returning
-			id,
-			description,
-			idempotency_key,
-			reversed_transaction_id,
-			created_at
-		"#,
+    insert into transactions (user_id, description, idempotency_key, request_hash, reversed_transaction_id)
+    values ($1, $2, $3, $4, $5)
+    on conflict (user_id, idempotency_key) do nothing
+    returning id, user_id, description, idempotency_key, request_hash, reversed_transaction_id, created_at
+    "#,
+    user_id,
     description,
-    idempotency_key
+    idempotency_key,
+    request_hash,
+    reversed_transaction_id
   )
-  .fetch_optional(executor)
-  .await?;
+    .fetch_optional(executor)
+    .await?;
 
   Ok(txn)
+}
+
+pub async fn acquire_idempotency_lock<'e>(
+  executor: impl Executor<'e, Database = Postgres>,
+  user_id: i32,
+  key: &str,
+) -> LedgerResult<()> {
+  // Postgres 2-argument advisory lock: (int4, int4)
+  sqlx::query!(
+    "select pg_advisory_xact_lock($1, hashtext($2))",
+    user_id,
+    key
+  )
+    .execute(executor)
+    .await?;
+
+  Ok(())
 }
 
 pub async fn is_user_party_to_transaction<'e>(
@@ -321,33 +345,4 @@ pub async fn get_entries_by_transaction_id<'e>(
   .await?;
 
   Ok(entries)
-}
-
-pub async fn insert_reversal_transaction<'e>(
-  executor: impl Executor<'e, Database = Postgres>,
-  description: &str,
-  idempotency_key: &str,
-  reversed_transaction_id: i32,
-) -> LedgerResult<Option<Transaction>> {
-  let txn = sqlx::query_as!(
-    Transaction,
-    r#"
-		insert into transactions (description, idempotency_key, reversed_transaction_id)
-		values ($1, $2, $3)
-		on conflict (idempotency_key) do nothing
-		returning 
-		    id, 
-		    description, 
-		    idempotency_key, 
-		    reversed_transaction_id, 
-		    created_at
-		"#,
-    description,
-    idempotency_key,
-    reversed_transaction_id
-  )
-  .fetch_optional(executor)
-  .await?;
-
-  Ok(txn)
 }

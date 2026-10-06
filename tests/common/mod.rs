@@ -93,9 +93,14 @@ impl TestHarness {
 
     if !balance.is_zero() {
       let seed_key = format!("seed-{}", Uuid::new_v4());
+      // Direct-seed fingerprint placeholder
+      let seed_hash = vec![0u8; 32];
+
       let draft = TransactionDraft::new(
+        self.default_user.id,
         "Initial Seed Funding".to_string(),
         seed_key,
+        seed_hash,
         vec![
           PostingDraft::new(asset.id, balance).unwrap(),
           PostingDraft::new(equity.id, -balance).unwrap(),

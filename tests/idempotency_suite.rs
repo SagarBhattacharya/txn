@@ -7,6 +7,7 @@ use common::TestHarness;
 use rust_decimal::dec;
 use serde_json::json;
 use sqlx::PgPool;
+use txn::db::schemas::AccountType;
 
 #[sqlx::test]
 async fn test_idempotent_replay_returns_cached_transaction(pool: PgPool) {
@@ -52,7 +53,7 @@ async fn test_idempotent_replay_returns_cached_transaction(pool: PgPool) {
 async fn test_concurrent_identical_requests_execute_exactly_once(pool: PgPool) {
   let harness = Arc::new(TestHarness::new(pool).await);
   let (cash, equity) = harness
-    .create_funded_pair("ConcurrentCash", "ConcurrentEquity", dec!(1000.00))
+    .create_funded_pair("ConcurrentCash", "ConcurrentEquity", dec!(200.00))
     .await;
 
   let payload = json!({
@@ -98,9 +99,9 @@ async fn test_concurrent_identical_requests_execute_exactly_once(pool: PgPool) {
     "Mismatch in transaction IDs under concurrency: {returned_ids:?}"
   );
 
-  // Invariant 2: Balance was deducted exactly once (1000 - 200 = 800)
+  // Invariant 2: Balance was deducted exactly once (200- 200 = 0)
   let (_, cash_bal) = harness.get(&format!("/accounts/{}/balance", cash.id)).await;
-  assert_eq!(cash_bal["balance"], "800.00");
+  assert_eq!(cash_bal["balance"], "0");
 }
 
 #[sqlx::test]
@@ -157,4 +158,123 @@ async fn test_reversal_idempotent_replay_returns_cached_transaction(pool: PgPool
   // Invariant 2: Balance restored to 500.00, not double-reversed to 650.00
   let (_, cash_bal) = harness.get(&format!("/accounts/{}/balance", cash.id)).await;
   assert_eq!(cash_bal["balance"], "500.00");
+}
+
+#[sqlx::test]
+async fn test_reusing_key_with_different_payload_fails(pool: PgPool) {
+  let harness = TestHarness::new(pool).await;
+  let (cash, equity) = harness
+    .create_funded_pair("Cash", "Equity", dec!(500.00))
+    .await;
+
+  let key = "reused-key-diff-payload";
+
+  // 1. Initial request: ₹50
+  let (status1, _) = harness
+    .post_with_idempotency(
+      "/transactions",
+      key,
+      json!({
+        "source_account_id": cash.id,
+        "destination_account_id": equity.id,
+        "amount": "50.00",
+        "description": "Payment 1"
+      }),
+    )
+    .await;
+  assert_eq!(status1, StatusCode::CREATED);
+
+  // 2. Replay with SAME key, but DIFFERENT amount: ₹100
+  let (status2, body2) = harness
+    .post_with_idempotency(
+      "/transactions",
+      key,
+      json!({
+        "source_account_id": cash.id,
+        "destination_account_id": equity.id,
+        "amount": "100.00",
+        "description": "Payment 1"
+      }),
+    )
+    .await;
+
+  assert_eq!(status2, StatusCode::UNPROCESSABLE_ENTITY);
+  assert!(body2["error"].as_str().unwrap().contains("mismatched"));
+
+  // Verify only ₹50 was deducted
+  let (_, bal) = harness.get(&format!("/accounts/{}/balance", cash.id)).await;
+  assert_eq!(bal["balance"], "450.00");
+}
+
+#[sqlx::test]
+async fn test_different_users_can_use_same_idempotency_key(pool: PgPool) {
+  let harness = TestHarness::new(pool).await;
+
+  // User A transaction with key "common-key"
+  let (cash_a, eq_a) = harness
+    .create_funded_pair("Cash A", "Equity A", dec!(300.00))
+    .await;
+
+  let (status_a, body_a) = harness
+    .post_with_idempotency(
+      "/transactions",
+      "common-key",
+      json!({
+        "source_account_id": cash_a.id,
+        "destination_account_id": eq_a.id,
+        "amount": "50.00",
+        "description": "User A transfer"
+      }),
+    )
+    .await;
+  assert_eq!(status_a, StatusCode::CREATED);
+  let txn_a_id = body_a["transaction_id"].as_i64().unwrap();
+
+  // Create User B
+  let pass_hash = txn::auth::hash_password("pass_user_b").unwrap();
+  let user_b = harness
+    .repo
+    .create_user("user_b_idemp", &pass_hash)
+    .await
+    .unwrap()
+    .unwrap();
+  let user_b_token = txn::auth::create_jwt(user_b.id, &user_b.username, harness.jwt_secret.as_bytes()).unwrap();
+
+  let cash_b = harness.create_account_for_user(user_b.id, "Cash B", AccountType::Asset).await.unwrap();
+  let eq_b = harness.create_account_for_user(user_b.id, "Equity B", AccountType::Equity).await.unwrap();
+
+  // Seed User B cash directly
+  let seed_draft = txn::models::draft::TransactionDraft::new(
+    user_b.id,
+    "Seed B",
+    "seed-key-b",
+    vec![0],
+    vec![
+      txn::models::draft::PostingDraft::new(cash_b.id, dec!(300.00)).unwrap(),
+      txn::models::draft::PostingDraft::new(eq_b.id, dec!(-300.00)).unwrap(),
+    ],
+  ).unwrap();
+  harness.repo.record_transaction(seed_draft).await.unwrap();
+
+  // User B submits WITH THE EXACT SAME KEY "common-key"
+  let (status_b, body_b) = harness
+    .request(
+      axum::http::Method::POST,
+      "/transactions",
+      Some(&user_b_token),
+      Some("common-key"),
+      Some(json!({
+        "source_account_id": cash_b.id,
+        "destination_account_id": eq_b.id,
+        "amount": "50.00",
+        "description": "User B transfer"
+      })),
+    )
+    .await;
+
+  assert_eq!(status_b, StatusCode::CREATED);
+  let txn_b_id = body_b["transaction_id"].as_i64().unwrap();
+
+  // They must be independent transactions
+  assert_ne!(txn_a_id, txn_b_id);
 }

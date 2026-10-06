@@ -6,6 +6,7 @@ use crate::{LedgerError, LedgerResult};
 use rust_decimal::Decimal;
 use sqlx::{Executor, PgPool, Postgres};
 use sqlx::postgres::PgPoolOptions;
+use crate::models::payload_fg::compute_reversal_hash;
 
 mod queries;
 mod recorder;
@@ -35,8 +36,8 @@ impl Repo {
   }
 
   pub async fn create_user(
-    &self, 
-    username: &str, 
+    &self,
+    username: &str,
     password_hash: &str
   ) -> LedgerResult<Option<User>> {
     queries::create_user(&self.pool, username, password_hash).await
@@ -76,7 +77,7 @@ impl Repo {
   }
 
   pub async fn get_entries_by_transaction_id(
-    &self, 
+    &self,
     transaction_id: i32
   ) -> LedgerResult<Vec<Entry>> {
     queries::get_entries_by_transaction_id(&self.pool, transaction_id).await
@@ -91,10 +92,25 @@ impl Repo {
   }
 
   pub async fn record_transaction(&self, draft: TransactionDraft) -> LedgerResult<i32> {
-    let tx = self.pool.begin().await?;
-    let mut recorder = TransactionRecorder::new(tx);
+    let mut tx = self.pool.begin().await?;
 
-    let txn_id = recorder.record(draft).await?;
+    // 1. Advisory lock scoped to (user_id, key)
+    queries::acquire_idempotency_lock(&mut *tx, draft.user_id, &draft.idempotency_key).await?;
+
+    // 2. Check if key was already used by this user
+    if let Some(existing) = queries::get_transaction_by_user_and_key(
+      &mut *tx, draft.user_id, &draft.idempotency_key
+    ).await? {
+      if existing.request_hash != draft.request_hash {
+        return Err(LedgerError::IdempotencyPayloadMismatch);
+      }
+      tx.commit().await?;
+      return Ok(existing.id);
+    }
+
+    // 3. Record entries
+    let mut recorder = TransactionRecorder::new(tx);
+    let txn_id = recorder.record(draft, None).await?;
     recorder.commit().await?;
 
     Ok(txn_id)
@@ -102,54 +118,55 @@ impl Repo {
 
   pub async fn reverse_transaction(
     &self,
+    user_id: i32,
     target_txn_id: i32,
     reason: &str,
     idempotency_key: impl Into<String>,
   ) -> LedgerResult<i32> {
     let key = idempotency_key.into();
+    let request_hash = compute_reversal_hash(target_txn_id, reason);
     let mut tx = self.pool.begin().await?;
 
-    // 0. Idempotency replay check FIRST
-    if let Some(existing) = queries::get_transaction_by_idempotency_key(&mut *tx, &key).await? {
+    // 1. Advisory lock scoped to (user_id, key)
+    queries::acquire_idempotency_lock(&mut *tx, user_id, &key).await?;
+
+    // 2. Replay check
+    if let Some(existing) = queries::get_transaction_by_user_and_key(
+      &mut *tx, user_id, &key
+    ).await? {
+      if existing.request_hash != request_hash {
+        return Err(LedgerError::IdempotencyPayloadMismatch);
+      }
       tx.commit().await?;
       return Ok(existing.id);
     }
 
-    // 1. Target transaction must exist
+    // 3. Target verification & already reversed check...
     let target_txn = queries::get_transaction_by_id(&mut *tx, target_txn_id)
       .await?
       .ok_or(LedgerError::TransactionNotFound(target_txn_id))?;
 
-    // 2. Target cannot be a reversal itself
     if target_txn.reversed_transaction_id.is_some() {
       return Err(LedgerError::CannotReverseReversal(target_txn_id));
     }
 
-    // 3. Target must not already have been reversed by another transaction
-    if queries::get_reversal_by_original_id(&mut *tx, target_txn_id)
-      .await?
-      .is_some()
-    {
+    if queries::get_reversal_by_original_id(&mut *tx, target_txn_id).await?.is_some() {
       return Err(LedgerError::AlreadyReversed(target_txn_id));
     }
 
-    // 4. Fetch original entries
     let original_entries = queries::get_entries_by_transaction_id(&mut *tx, target_txn_id).await?;
-
-    // 5. Invert legs: delta * -1
     let inverted_postings = original_entries
       .into_iter()
       .map(|e| PostingDraft::new(e.account_id, -e.amount))
       .collect::<LedgerResult<Vec<_>>>()?;
 
     let desc = format!("Reversal of Txn #{target_txn_id}: {reason}");
-    let draft = TransactionDraft::new(desc, key, inverted_postings)?;
+    let draft = TransactionDraft::new(user_id, desc, key, request_hash, inverted_postings)?;
 
-    // 6. Record reversal under locks & commit
     let mut recorder = TransactionRecorder::new(tx);
-    let rev_id = recorder.record_reversal(draft, target_txn_id).await?;
+    let txn_id = recorder.record(draft, Some(target_txn_id)).await?;
     recorder.commit().await?;
 
-    Ok(rev_id)
+    Ok(txn_id)
   }
 }
