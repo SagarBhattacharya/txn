@@ -13,6 +13,12 @@ pub enum AccountType {
   Expense,
 }
 
+impl AccountType {
+  pub fn allows_negative_balance(&self) -> bool {
+    !matches!(self, AccountType::Asset)
+  }
+}
+
 #[derive(Debug, FromRow, PartialEq)]
 pub struct User {
   pub id: i32,
@@ -21,7 +27,7 @@ pub struct User {
   pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, FromRow, PartialEq)]
+#[derive(Debug, FromRow, PartialEq, Serialize, Deserialize)]
 pub struct Account {
   pub id: i32,
   pub owner_id: i32,
@@ -41,16 +47,9 @@ pub struct Transaction {
   pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, FromRow, PartialEq)]
-pub struct Entry {
-  pub id: i32,
-  pub transaction_id: i32,
+#[derive(Debug, PartialEq, FromRow)]
+pub struct EntryWithOwner {
   pub account_id: i32,
   pub amount: Decimal,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct LockedAccountRecord {
-  pub id: i32,
-  pub account_type: AccountType,
+  pub owner_id: i32,
 }

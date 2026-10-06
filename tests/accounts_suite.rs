@@ -4,7 +4,6 @@ use axum::http::StatusCode;
 use common::TestHarness;
 use serde_json::json;
 use sqlx::PgPool;
-use txn::auth::*;
 
 #[sqlx::test]
 async fn test_create_account_lifecycle(pool: PgPool) {
@@ -116,20 +115,7 @@ async fn test_cannot_access_other_users_account(pool: PgPool) {
   let user_a_account_id = body["id"].as_i64().unwrap() as i32;
 
   // 2. Create User B in the database and issue a token for User B
-  let pass_hash = hash_password("pass_b_9999").unwrap();
-  let user_b = harness
-    .repo
-    .create_user("user_b", &pass_hash)
-    .await
-    .expect("Failed to seed User B")
-    .expect("User B exists");
-  
-  let user_b_token = create_jwt(
-    user_b.id,
-    &user_b.username,
-    harness.jwt_secret.as_bytes(),
-  )
-    .unwrap();
+  let (_, user_b_token) = harness.create_user("user_b", "pass_b_9999").await;
 
   // 3. User B attempts to access User A's account
   // If your policy hides foreign resources, expect 404; if it explicitly forbids, expect 403.
@@ -201,7 +187,12 @@ async fn test_duplicate_account_name_same_user_rejected(pool: PgPool) {
     )
     .await;
   assert_eq!(dup_status, StatusCode::CONFLICT);
-  assert!(dup_body["error"].as_str().unwrap().contains("already exists"));
+  assert!(
+    dup_body["error"]
+      .as_str()
+      .unwrap()
+      .contains("already exists")
+  );
 }
 
 #[sqlx::test]
@@ -221,20 +212,7 @@ async fn test_duplicate_account_name_different_users_allowed(pool: PgPool) {
   assert_eq!(status_a, StatusCode::CREATED);
 
   // 2. Create User B
-  let pass_hash = hash_password("pass_b_9999").unwrap();
-  let user_b = harness
-    .repo
-    .create_user("user_b_savings", &pass_hash)
-    .await
-    .expect("Query failed")
-    .expect("User should exist");
-
-  let user_b_token = create_jwt(
-    user_b.id,
-    &user_b.username,
-    harness.jwt_secret.as_bytes(),
-  )
-    .unwrap();
+  let (user_b, user_b_token) = harness.create_user("user_b_savings", "pass_b_9999").await;
 
   // 3. User B creates "Savings" -> should succeed
   let (status_b, body_b) = harness
@@ -274,19 +252,7 @@ async fn test_get_all_accounts_filters_by_owner(pool: PgPool) {
     .await;
 
   // User B creates one account
-  let pass_hash = hash_password("pass_b_all").unwrap();
-  let user_b = harness
-    .repo
-    .create_user("user_b_all", &pass_hash)
-    .await
-    .unwrap()
-    .unwrap();
-  let user_b_token = create_jwt(
-    user_b.id,
-    &user_b.username,
-    harness.jwt_secret.as_bytes(),
-  )
-    .unwrap();
+  let (_, user_b_token) = harness.create_user("user_b_all", "pass_b_all").await;
 
   harness
     .request(
@@ -303,5 +269,9 @@ async fn test_get_all_accounts_filters_by_owner(pool: PgPool) {
   assert_eq!(status, StatusCode::OK);
   let accounts = body.as_array().expect("Expected array of accounts");
   assert_eq!(accounts.len(), 2);
-  assert!(accounts.iter().all(|a| a["owner_id"] == harness.default_user.id));
+  assert!(
+    accounts
+      .iter()
+      .all(|a| a["owner_id"] == harness.default_user.id)
+  );
 }

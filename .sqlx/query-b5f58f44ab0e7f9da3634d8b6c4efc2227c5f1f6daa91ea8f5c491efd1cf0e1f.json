@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t    select * from transactions\n\t    where user_id = $1 AND idempotency_key = $2\n\t  ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "idempotency_key",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "idempotency_key"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "request_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "request_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "reversed_transaction_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "reversed_transaction_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "b5f58f44ab0e7f9da3634d8b6c4efc2227c5f1f6daa91ea8f5c491efd1cf0e1f"
+}
