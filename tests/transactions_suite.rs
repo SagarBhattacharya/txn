@@ -335,3 +335,96 @@ async fn test_transfer_to_another_users_account_succeeds(pool: PgPool) {
     .unwrap();
   assert_eq!(recipient_bal, dec!(120.00));
 }
+
+#[sqlx::test]
+async fn test_reject_sub_cent_precision_amount(pool: PgPool) {
+  let harness = TestHarness::new(pool).await;
+  let (cash, equity) = harness
+    .create_funded_pair("CashSubCent", "EquitySubCent", dec!(1000.00))
+    .await;
+
+  // Attempt transfer with 3 decimal places (0.004)
+  let payload = json!({
+    "source_account_id": cash.id,
+    "destination_account_id": equity.id,
+    "amount": "0.004",
+    "description": "Sub-cent transfer"
+  });
+
+  let (status, body) = harness.post_json("/transactions", payload).await;
+  assert_eq!(status, StatusCode::BAD_REQUEST);
+  assert!(body["error"]
+    .as_str()
+    .unwrap()
+    .contains("cannot exceed 2 decimal places"));
+}
+
+#[sqlx::test]
+async fn test_reject_amount_exceeding_numeric_12_2_limit(pool: PgPool) {
+  let harness = TestHarness::new(pool).await;
+  let (cash, equity) = harness
+    .create_funded_pair("CashOverflow", "EquityOverflow", dec!(1000.00))
+    .await;
+
+  // Value has 11 integer digits, which exceeds numeric(12,2)
+  let payload = json!({
+    "source_account_id": cash.id,
+    "destination_account_id": equity.id,
+    "amount": "99999999999.00",
+    "description": "Overflow transfer"
+  });
+
+  let (status, body) = harness.post_json("/transactions", payload).await;
+  assert_eq!(status, StatusCode::BAD_REQUEST);
+  assert!(body["error"]
+    .as_str()
+    .unwrap()
+    .contains("exceeds maximum allowed limit"));
+}
+
+#[sqlx::test]
+async fn test_database_enforces_append_only_immutability(pool: PgPool) {
+  let harness = TestHarness::new(pool.clone()).await;
+  let (cash, equity) = harness
+    .create_funded_pair("CashImmut", "EquityImmut", dec!(500.00))
+    .await;
+
+  let (_, body) = harness
+    .post_json(
+      "/transactions",
+      json!({
+        "source_account_id": cash.id,
+        "destination_account_id": equity.id,
+        "amount": "100.00",
+        "description": "Immutable transfer"
+      }),
+    )
+    .await;
+
+  let txn_id = body["transaction_id"].as_i64().unwrap() as i32;
+
+  // 1. Attempt raw SQL UPDATE on transactions table
+  let update_res = sqlx::query!(
+    "UPDATE transactions SET description = 'Tampered' WHERE id = $1",
+    txn_id
+  )
+    .execute(&pool)
+    .await;
+
+  assert!(update_res.is_err(), "UPDATE on transactions must fail");
+  let err_str = update_res.unwrap_err().to_string();
+  println!("ACTUAL DB ERROR: {err_str}");
+  assert!(err_str.contains("ledger records are immutable"));
+
+  // 2. Attempt raw SQL DELETE on entries table
+  let delete_res = sqlx::query!(
+    "DELETE FROM entries WHERE transaction_id = $1",
+    txn_id
+  )
+    .execute(&pool)
+    .await;
+
+  assert!(delete_res.is_err(), "DELETE on entries must fail");
+  let err_str = delete_res.unwrap_err().to_string();
+  assert!(err_str.contains("ledger records are immutable"));
+}

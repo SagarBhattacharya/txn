@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:18-alpine
     container_name: txn-pg
     restart: unless-stopped
     environment:

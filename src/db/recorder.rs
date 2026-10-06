@@ -55,7 +55,9 @@ impl<'c> TransactionRecorder<'c> {
           &mut *self.tx, draft.user_id, &draft.idempotency_key
         )
           .await?
-          .ok_or_else(|| LedgerError::DatabaseError("Row Not Found".into()))?;
+          .ok_or_else(|| LedgerError::DatabaseError(
+            "Transaction conflict occurred but existing record could not be retrieved".into(),
+          ))?;
         
         existing.id
       }

@@ -2,11 +2,11 @@ use crate::config::Config;
 use crate::db::recorder::TransactionRecorder;
 use crate::db::schemas::*;
 use crate::models::draft::{PostingDraft, TransactionDraft};
+use crate::models::payload_fg::compute_reversal_hash;
 use crate::{LedgerError, LedgerResult};
 use rust_decimal::Decimal;
-use sqlx::{Executor, PgPool, Postgres};
 use sqlx::postgres::PgPoolOptions;
-use crate::models::payload_fg::compute_reversal_hash;
+use sqlx::PgPool;
 
 mod queries;
 mod recorder;
@@ -83,7 +83,7 @@ impl Repo {
     queries::get_entries_by_transaction_id(&self.pool, transaction_id).await
   }
 
-  pub async fn is_user_party_to_transaction<'e>(
+  pub async fn is_user_party_to_transaction(
     &self,
     transaction_id: i32,
     user_id: i32,

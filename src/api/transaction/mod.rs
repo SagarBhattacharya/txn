@@ -1,7 +1,7 @@
 use crate::api::AppState;
 use axum::Router;
 use axum::routing::post;
-use rust_decimal::Decimal;
+use rust_decimal::{dec, Decimal};
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
@@ -41,15 +41,6 @@ pub(crate) fn transaction_router() -> Router<AppState> {
     .route("/{id}/reverse", post(routes::reverse_transaction))
 }
 
-fn validate_positive_amount(amount: &Decimal) -> Result<(), ValidationError> {
-  if *amount <= Decimal::ZERO {
-    let mut err = ValidationError::new("invalid_amount");
-    err.message = Some("Transfer amount must be strictly greater than zero".into());
-    return Err(err);
-  }
-  Ok(())
-}
-
 fn validate_distinct_accounts(req: &TransferRequest) -> Result<(), ValidationError> {
   if req.source_account_id == req.destination_account_id {
     let mut err = ValidationError::new("identical_accounts");
@@ -66,5 +57,31 @@ fn validate_reason(reason: &str) -> Result<(), ValidationError> {
     err.message = Some("Reversal reason must be between 3 and 256 non-empty characters".into());
     return Err(err);
   }
+  Ok(())
+}
+
+const MAX_TRANSFER_AMOUNT: Decimal = dec!(9999999999.99);
+
+fn validate_positive_amount(amount: &Decimal) -> Result<(), ValidationError> {
+  if *amount <= Decimal::ZERO {
+    let mut err = ValidationError::new("invalid_amount");
+    err.message = Some("Transfer amount must be strictly greater than zero".into());
+    return Err(err);
+  }
+
+  // Enforce maximum 2 decimal places (cents/paise)
+  if amount.scale() > 2 {
+    let mut err = ValidationError::new("invalid_amount_precision");
+    err.message = Some("Transfer amount cannot exceed 2 decimal places".into());
+    return Err(err);
+  }
+
+  // Enforce maximum magnitude supported by NUMERIC(12, 2)
+  if *amount > MAX_TRANSFER_AMOUNT {
+    let mut err = ValidationError::new("amount_out_of_range");
+    err.message = Some("Transfer amount exceeds maximum allowed limit (9999999999.99)".into());
+    return Err(err);
+  }
+
   Ok(())
 }

@@ -45,3 +45,20 @@ create table entries (
 
 create index idx_entries_account_id on entries(account_id);
 create index idx_entries_transaction_id on entries(transaction_id);
+
+create or replace function prevent_modification_ledger_audit()
+    returns trigger as $$
+begin
+    raise exception 'ledger records are immutable: % on table % is prohibited', tg_op, tg_table_name;
+end;
+$$ language plpgsql;
+
+create trigger trg_no_modify_transactions
+    before update or delete on transactions
+    for each row
+execute function prevent_modification_ledger_audit();
+
+create trigger trg_no_modify_entries
+    before update or delete on entries
+    for each row
+execute function prevent_modification_ledger_audit();

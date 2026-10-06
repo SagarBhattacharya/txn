@@ -231,7 +231,7 @@ pub async fn get_transaction_by_id<'e>(
 			reversed_transaction_id,
 			created_at
 		from transactions
-		where id = $1
+		where id = $1 for update
 		"#,
     id
   )

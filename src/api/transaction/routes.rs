@@ -72,11 +72,10 @@ pub async fn reverse_transaction(
   
   if !is_party {
     // Return 404 if it doesn't exist, or 403 if it exists but caller is not a party
-    let exists = state.repo.get_entries_by_transaction_id(id).await?.is_empty();
-    if exists {
+    let entries = state.repo.get_entries_by_transaction_id(id).await?;
+    if entries.is_empty() {
       return Err(ApiError::NotFound(format!("Transaction with id {id} not found")));
     }
-    
     return Err(ApiError::Forbidden(
       "You are not authorized to reverse this transaction".into(),
     ));

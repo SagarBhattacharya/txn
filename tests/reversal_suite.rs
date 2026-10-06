@@ -244,3 +244,71 @@ async fn test_cross_tenant_reversal_forbidden_for_outsider(pool: PgPool) {
     .unwrap()
     .contains("not authorized to reverse this transaction"));
 }
+
+#[sqlx::test]
+async fn test_concurrent_double_reversal_returns_422_not_500(pool: PgPool) {
+  let harness = std::sync::Arc::new(TestHarness::new(pool).await);
+  let (cash, equity) = harness
+    .create_funded_pair("CashConc", "EquityConc", dec!(1000.00))
+    .await;
+
+  // 1. Create target transaction
+  let (_, body) = harness
+    .post_json(
+      "/transactions",
+      json!({
+        "source_account_id": cash.id,
+        "destination_account_id": equity.id,
+        "amount": "200.00",
+        "description": "Original transfer to reverse concurrently"
+      }),
+    )
+    .await;
+  let target_txn_id = body["transaction_id"].as_i64().unwrap();
+
+  // 2. Fire 2 concurrent reversals with DIFFERENT idempotency keys
+  let h1 = std::sync::Arc::clone(&harness);
+  let h2 = std::sync::Arc::clone(&harness);
+
+  let task1 = tokio::spawn(async move {
+    h1.post_with_idempotency(
+      &format!("/transactions/{target_txn_id}/reverse"),
+      "rev-race-key-1",
+      json!({ "reason": "Concurrent reason 1" }),
+    )
+      .await
+  });
+
+  let task2 = tokio::spawn(async move {
+    h2.post_with_idempotency(
+      &format!("/transactions/{target_txn_id}/reverse"),
+      "rev-race-key-2",
+      json!({ "reason": "Concurrent reason 2" }),
+    )
+      .await
+  });
+
+  let (res1, res2) = tokio::join!(task1, task2);
+  let (status1, _) = res1.expect("task 1 panicked");
+  let (status2, _) = res2.expect("task 2 panicked");
+
+  let statuses = vec![status1, status2];
+
+  // Exactly one must succeed (201 CREATED) and one must be rejected (422 UNPROCESSABLE_ENTITY)
+  assert!(
+    statuses.contains(&StatusCode::CREATED),
+    "One request must succeed with 201 Created: {statuses:?}"
+  );
+  assert!(
+    statuses.contains(&StatusCode::UNPROCESSABLE_ENTITY),
+    "The losing race must receive 422 Unprocessable Entity (not 500): {statuses:?}"
+  );
+
+  // Assert no 500 error occurred
+  assert_ne!(status1, StatusCode::INTERNAL_SERVER_ERROR);
+  assert_ne!(status2, StatusCode::INTERNAL_SERVER_ERROR);
+
+  // Balance must be restored to 1000.00, not double-reversed to 1200.00
+  let (_, bal) = harness.get(&format!("/accounts/{}/balance", cash.id)).await;
+  assert_eq!(bal["balance"], "1000.00");
+}
