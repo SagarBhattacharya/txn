@@ -17,7 +17,7 @@ uuid = { version = "1.27.0", features = ["v4"] }
 # Web & HTTP
 axum = { version = "0.8.9" }
 tower = { version = "0.5.3", default-features = false }
-tower-http = { version = "0.7.1", features = ["trace", "request-id", "util"] }
+tower-http = { version = "0.7.1", features = ["trace", "request-id", "util", "cors"] }
 http-body-util = "0.1.5"
 
 # Security & Auth

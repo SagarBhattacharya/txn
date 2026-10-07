@@ -368,12 +368,10 @@ async fn test_database_enforces_append_only_immutability(pool: PgPool) {
   let txn_id = body["transaction_id"].as_i64().unwrap() as i32;
 
   // 1. Attempt raw SQL UPDATE on transactions table
-  let update_res = sqlx::query!(
-    "UPDATE transactions SET description = 'Tampered' WHERE id = $1",
-    txn_id
-  )
-  .execute(&pool)
-  .await;
+  let update_res = sqlx::query("UPDATE transactions SET description = 'Tampered' WHERE id = $1")
+    .bind(txn_id)
+    .execute(&pool)
+    .await;
 
   assert!(update_res.is_err(), "UPDATE on transactions must fail");
   let err_str = update_res.unwrap_err().to_string();
@@ -381,7 +379,8 @@ async fn test_database_enforces_append_only_immutability(pool: PgPool) {
   assert!(err_str.contains("db records are immutable"));
 
   // 2. Attempt raw SQL DELETE on entries table
-  let delete_res = sqlx::query!("DELETE FROM entries WHERE transaction_id = $1", txn_id)
+  let delete_res = sqlx::query("DELETE FROM entries WHERE transaction_id = $1")
+    .bind(txn_id)
     .execute(&pool)
     .await;
 

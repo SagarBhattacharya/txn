@@ -231,4 +231,22 @@ impl Query {
       .fetch_all(ex)
       .await
   }
+
+  pub async fn get_account_activity(
+    ex: impl PgExecutor<'_>, 
+    account_id: i32
+  ) -> Result<Vec<AccountActivity>> {
+    sqlx::query_as(r#"
+      select t.id as transaction_id, t.description, e.amount, t.created_at,
+             t.reversed_transaction_id as reverses
+      from entries e
+      join transactions t on t.id = e.transaction_id
+      where e.account_id = $1
+      order by e.id desc
+      limit 50
+    "#)
+      .bind(account_id)
+      .fetch_all(ex)
+      .await
+  }
 }

@@ -53,3 +53,12 @@ pub struct EntryWithOwner {
   pub amount: Decimal,
   pub owner_id: i32,
 }
+
+#[derive(Debug, FromRow, Serialize)]
+pub struct AccountActivity {
+  pub transaction_id: i32,
+  pub description: String,
+  pub amount: Decimal,
+  pub created_at: DateTime<Utc>,
+  pub reverses: Option<i32>,
+}

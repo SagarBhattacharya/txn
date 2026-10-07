@@ -46,17 +46,5 @@ services:
     depends_on:
       - backend
 
-  appsmith:
-    image: appsmith/appsmith-ce:latest
-    container_name: txn-appsmith
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-    volumes:
-      - appsmith_data:/appsmith/data
-    depends_on:
-      - backend
-
 volumes:
   pg_data:
-  appsmith_data:

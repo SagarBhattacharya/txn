@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>txn</title>
+
+<!-- Font and Alpine come from one CDN. If the font fails to load, the system font is used. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/manrope@5/index.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14172a;
+    --surface: #1c2038;
+    --raised: #252a47;
+    --line: #2f3555;
+    --text: #eceff8;
+    --muted: #a0a8c4;
+    --accent: #a99cff;
+    --accent-hover: #bcb2ff;
+    --accent-ink: #14172a;
+    --in: #7fdcb4;
+    --out: #ff9d8f;
+    --r-xl: 28px;
+    --r-lg: 20px;
+    --r-md: 14px;
+  }
+
+  * { box-sizing: border-box; }
+  [x-cloak] { display: none !important; }
+
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 "Manrope Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 460px; margin: 0 auto; padding: 48px 20px 96px; }
+
+  /* ---------- header ---------- */
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; min-height: 28px; }
+  .logo { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; }
+  .who { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 0.9rem; }
+
+  /* ---------- type ---------- */
+  h1 { font-size: 1.6rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
+  h2 { font-size: 1rem; font-weight: 600; color: var(--muted); margin: 40px 4px 0; }
+  .lede { color: var(--muted); margin: 0 0 28px; }
+  .muted { color: var(--muted); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- surfaces ---------- */
+  .card { background: var(--surface); border-radius: var(--r-xl); padding: 32px 28px; }
+  .stack > * + * { margin-top: 20px; }
+
+  /* ---------- form ---------- */
+  label { display: block; font-size: 0.875rem; color: var(--muted); margin: 22px 0 8px 2px; }
+  label:first-of-type { margin-top: 0; }
+  input, select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 15px 16px;
+    font: inherit;
+    outline: none;
+  }
+  input::placeholder { color: #6b7396; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(169, 156, 255, 0.2); }
+
+  /* ---------- buttons ---------- */
+  button { font: inherit; cursor: pointer; border: 0; border-radius: var(--r-md); }
+  button:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .btn { width: 100%; padding: 15px 18px; font-weight: 700; background: var(--accent); color: var(--accent-ink); }
+  .btn:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.quiet { background: var(--raised); color: var(--text); font-weight: 600; }
+  .btn.quiet:hover { background: #2e3556; }
+  .submit { margin-top: 28px; }
+  .link { background: none; color: var(--muted); padding: 4px 2px; border-radius: 8px; }
+  .link:hover { color: var(--text); }
+  .switch { text-align: center; margin: 24px 0 0; }
+
+  /* ---------- messages ---------- */
+  .msg { border-radius: var(--r-md); padding: 14px 18px; margin-bottom: 24px; font-size: 0.95rem; }
+  .msg.err { background: rgba(255, 157, 143, 0.12); color: #ffc1b8; }
+  .msg.ok { background: rgba(127, 220, 180, 0.12); color: #a8ecd0; }
+
+  /* ---------- home ---------- */
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    width: 100%; text-align: left; color: var(--text);
+    background: var(--surface); border-radius: var(--r-lg); padding: 20px 22px;
+  }
+  button.row:hover { background: var(--raised); }
+  .row .main { display: block; min-width: 0; }
+  .row .name { display: block; font-weight: 700; overflow-wrap: anywhere; }
+  .row .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; font-size: 0.85rem; color: var(--muted); }
+  .chip { padding: 1px 10px; border-radius: 999px; background: var(--raised); text-transform: capitalize; }
+  .amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .neg { color: var(--out); }
+  .pos { color: var(--in); }
+  .empty { padding: 32px 8px; text-align: center; color: var(--muted); }
+  .tip { margin: 28px 4px 0; font-size: 0.9rem; color: var(--muted); }
+  .newform { margin-top: 16px; padding: 24px; border-radius: var(--r-lg); }
+
+  /* ---------- history ---------- */
+  .back { margin: -12px 0 20px -2px; }
+  .hero { text-align: center; padding: 36px 28px 28px; }
+  .hero .meta { justify-content: center; }
+  .hero .big { font-size: 2.6rem; font-weight: 800; letter-spacing: -0.03em; margin: 22px 0 26px; font-variant-numeric: tabular-nums; }
+  .hero h1 { margin-bottom: 0; overflow-wrap: anywhere; }
+
+  @media (max-width: 380px) {
+    .wrap { padding-top: 32px; }
+    .card { padding: 26px 20px; }
+  }
+</style>
+</head>
+
+<body x-data="app()" x-init="init()">
+<main class="wrap" x-cloak>
+
+  <header class="top">
+    <div class="logo">txn</div>
+    <div class="who" x-show="token">
+      <span x-text="username"></span>
+      <button type="button" class="link" @click="logout()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="msg err" role="alert" x-show="error" x-text="error"></div>
+
+  <!-- ================= sign in / sign up ================= -->
+  <section x-show="view === 'auth'" class="card">
+    <h1 x-text="mode === 'login' ? 'Welcome back' : 'Create your login'"></h1>
+    <p class="lede" x-text="mode === 'login' ? 'Sign in to see your accounts.' : 'Pick a username and a password to get started.'"></p>
+
+    <form @submit.prevent="submitAuth()">
+      <label for="username">Username</label>
+      <input id="username" type="text" x-model="form.username" required
+             autocomplete="username" autocapitalize="none" spellcheck="false">
+
+      <label for="password">Password</label>
+      <input id="password" type="password" x-model="form.password" required
+             :autocomplete="mode === 'login' ? 'current-password' : 'new-password'">
+
+      <button type="submit" class="btn submit" :disabled="busy"
+              x-text="busy ? 'Please wait…' : (mode === 'login' ? 'Sign in' : 'Sign up')"></button>
+    </form>
+
+    <p class="switch">
+      <button type="button" class="link" @click="mode = mode === 'login' ? 'register' : 'login'; error = ''"
+              x-text="mode === 'login' ? 'No login yet? Sign up' : 'Already have a login? Sign in'"></button>
+    </p>
+  </section>
+
+  <!-- ================= home ================= -->
+  <section x-show="view === 'home'">
+    <h1>Your accounts</h1>
+    <p class="lede">Pick an account to see its activity.</p>
+
+    <div class="msg ok" x-show="notice" x-text="notice"></div>
+
+    <div class="actions">
+      <button type="button" class="btn" @click="openPay()" :disabled="!accounts.length">Pay someone</button>
+      <button type="button" class="btn quiet" @click="newAcct.open = !newAcct.open"
+              x-text="newAcct.open ? 'Cancel' : 'New account'"></button>
+    </div>
+
+    <form class="card newform" x-show="newAcct.open" @submit.prevent="createAccount()">
+      <label for="acct-name">Account name</label>
+      <input id="acct-name" type="text" x-model="newAcct.name" required placeholder="Everyday spending" autocomplete="off">
+
+      <label for="acct-type">Account type</label>
+      <select id="acct-type" x-model="newAcct.type">
+        <option value="Asset">Asset</option>
+        <option value="Liability">Liability</option>
+        <option value="Equity">Equity</option>
+        <option value="Revenue">Revenue</option>
+        <option value="Expense">Expense</option>
+      </select>
+
+      <button type="submit" class="btn submit" :disabled="busy" x-text="busy ? 'Creating…' : 'Create account'"></button>
+    </form>
+
+    <div class="list">
+      <template x-for="a in accounts" :key="a.id">
+        <button type="button" class="row" @click="openHistory(a)">
+          <span class="main">
+            <span class="name" x-text="a.name"></span>
+            <span class="meta">
+              <span class="chip" x-text="a.account_type"></span>
+              <span>Account no. <span class="num" x-text="a.id"></span></span>
+            </span>
+          </span>
+          <span class="amt" :class="{ neg: isNeg(balances[a.id]) }"
+                x-text="balances[a.id] === undefined ? '…' : fmt(balances[a.id])"></span>
+        </button>
+      </template>
+    </div>
+
+    <p class="empty" x-show="loaded && !accounts.length">No accounts yet. Create your first one to get started.</p>
+    <p class="tip" x-show="showFundingTip">
+      To try things out with test money, create an equity account and an asset account,
+      then send from the equity account to the asset account's number.
+    </p>
+  </section>
+
+  <!-- ================= pay ================= -->
+  <section x-show="view === 'pay'">
+    <button type="button" class="link back" @click="go('home')">Back to accounts</button>
+
+    <div class="card">
+      <h1>Send a payment</h1>
+      <p class="lede">Money leaves the account you choose right away.</p>
+
+      <form @submit.prevent="submitPay()">
+        <label for="pay-from">From</label>
+        <select id="pay-from" x-model.number="pay.source">
+          <template x-for="a in accounts" :key="a.id">
+            <option :value="a.id" x-text="`${a.name} (${balances[a.id] === undefined ? '…' : fmt(balances[a.id])})`"></option>
+          </template>
+        </select>
+
+        <label for="pay-to">To account number</label>
+        <input id="pay-to" type="text" inputmode="numeric" pattern="[0-9]*" x-model="pay.dest" required
+               placeholder="42" autocomplete="off">
+
+        <label for="pay-amount">Amount</label>
+        <input id="pay-amount" type="text" inputmode="decimal" x-model="pay.amount" required
+               placeholder="25.00" autocomplete="off">
+
+        <label for="pay-desc">Description</label>
+        <input id="pay-desc" type="text" x-model="pay.desc" required placeholder="Rent for October" autocomplete="off">
+
+        <button type="submit" class="btn submit" :disabled="busy" x-text="busy ? 'Sending…' : 'Send payment'"></button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ================= history ================= -->
+  <section x-show="view === 'history'">
+    <button type="button" class="link back" @click="go('home')">Back to accounts</button>
+
+    <div class="card hero" x-show="current">
+      <h1 x-text="current && current.name"></h1>
+      <div class="meta">
+        <span class="chip" x-text="current && current.account_type"></span>
+        <span>Account no. <span class="num" x-text="current && current.id"></span></span>
+      </div>
+      <div class="big" :class="{ neg: current && isNeg(balances[current.id]) }"
+           x-text="current ? (balances[current.id] === undefined ? '…' : fmt(balances[current.id])) : ''"></div>
+      <button type="button" class="btn quiet" @click="openPay(current.id)">Pay from this account</button>
+    </div>
+
+    <h2>Activity</h2>
+    <div class="list">
+      <template x-for="t in activity" :key="t.transaction_id">
+        <div class="row">
+          <span class="main">
+            <span class="name" x-text="t.description"></span>
+            <span class="meta">
+              <span>Transaction <span class="num" x-text="t.transaction_id"></span></span>
+              <span x-text="when(t.created_at)"></span>
+            </span>
+          </span>
+          <span class="amt" :class="isNeg(t.amount) ? 'neg' : 'pos'" x-text="signed(t.amount)"></span>
+        </div>
+      </template>
+    </div>
+    <p class="empty" x-show="activityLoaded && !activity.length">No activity on this account yet.</p>
+  </section>
+
+</main>
+
+<script>
+  function app() {
+    return {
+      // ---- state ----
+      view: 'auth',                       // auth | home | pay | history
+      mode: 'login',                      // login | register
+      token: sessionStorage.getItem('txn_token'),
+      username: sessionStorage.getItem('txn_user') || '',
+      busy: false,
+      error: '',
+      notice: '',
+      loaded: false,
+      activityLoaded: false,
+      accounts: [],
+      balances: {},
+      activity: [],
+      current: null,
+      form: { username: '', password: '' },
+      newAcct: { open: false, name: '', type: 'Asset' },
+      pay: { source: '', dest: '', amount: '', desc: '', key: null, sig: null },
+
+      // ---- lifecycle ----
+      async init() {
+        if (!this.token) return;
+        this.view = 'home';
+        await this.run(() => this.loadAccounts());
+      },
+
+      get showFundingTip() {
+        if (!this.loaded) return false;
+        if (this.accounts.length < 2) return true;
+        if (Object.keys(this.balances).length < this.accounts.length) return false;
+        return !Object.values(this.balances).some(b => !this.isNeg(b) && /[1-9]/.test(String(b)));
+      },
+
+      // ---- navigation ----
+      go(view) {
+        this.error = '';
+        this.notice = '';
+        this.view = view;
+        window.scrollTo(0, 0);
+      },
+
+      logout(message = '') {
+        this.token = null;
+        this.username = '';
+        sessionStorage.removeItem('txn_token');
+        sessionStorage.removeItem('txn_user');
+        this.accounts = [];
+        this.balances = {};
+        this.activity = [];
+        this.current = null;
+        this.loaded = false;
+        this.mode = 'login';
+        this.go('auth');
+        this.error = message;
+      },
+
+      // ---- api ----
+      async api(path, { method = 'GET', body, headers = {} } = {}) {
+        const h = { ...headers };
+        if (body !== undefined) h['Content-Type'] = 'application/json';
+        if (this.token) h['Authorization'] = 'Bearer ' + this.token;
+
+        let res;
+        try {
+          res = await fetch(path, {
+            method,
+            headers: h,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+          });
+        } catch {
+          throw new Error('Cannot reach the server. Check your connection and try again.');
+        }
+
+        let data = null;
+        try { data = await res.json(); } catch { /* non-JSON body */ }
+
+        if (res.status === 401 && this.token) {
+          this.logout('Your session expired. Sign in again.');
+          const err = new Error('Session expired');
+          err.handled = true;
+          throw err;
+        }
+        if (!res.ok) {
+          let msg = (data && data.error) || `Something went wrong (status ${res.status}).`;
+          msg = msg
+            .replace(/^Failed to deserialize the JSON body into the target type:\s*/, '')
+            .replace(/\s+at line \d+ column \d+$/, '');
+          throw new Error(msg);
+        }
+        return data;
+      },
+
+      async run(fn) {
+        this.error = '';
+        this.busy = true;
+        try {
+          await fn();
+        } catch (e) {
+          if (!e.handled) this.error = e.message;
+        } finally {
+          this.busy = false;
+        }
+      },
+
+      // ---- actions ----
+      async submitAuth() {
+        await this.run(async () => {
+          const path = this.mode === 'login' ? '/users/login' : '/users/register';
+          const data = await this.api(path, {
+            method: 'POST',
+            body: { username: this.form.username, password: this.form.password },
+          });
+          this.token = data.token;
+          this.username = data.username;
+          sessionStorage.setItem('txn_token', data.token);
+          sessionStorage.setItem('txn_user', data.username);
+          this.form.password = '';
+          this.go('home');
+          await this.loadAccounts();
+        });
+      },
+
+      async loadAccounts() {
+        this.accounts = await this.api('/accounts');
+        this.loaded = true;
+        const pairs = await Promise.all(
+          this.accounts.map(async a => [a.id, (await this.api(`/accounts/${a.id}/balance`)).balance])
+        );
+        this.balances = Object.fromEntries(pairs);
+      },
+
+      async createAccount() {
+        await this.run(async () => {
+          await this.api('/accounts', {
+            method: 'POST',
+            body: { name: this.newAcct.name, account_type: this.newAcct.type },
+          });
+          this.newAcct = { open: false, name: '', type: 'Asset' };
+          await this.loadAccounts();
+        });
+      },
+
+      openPay(sourceId) {
+        this.pay = {
+          source: sourceId ?? (this.accounts[0] ? this.accounts[0].id : ''),
+          dest: '', amount: '', desc: '', key: null, sig: null,
+        };
+        this.go('pay');
+      },
+
+      async submitPay() {
+        await this.run(async () => {
+          const dest = Number(this.pay.dest.trim());
+          if (!Number.isInteger(dest) || dest <= 0) {
+            throw new Error('Enter the destination account number as a whole number.');
+          }
+          if (dest === Number(this.pay.source)) {
+            throw new Error('Choose a different account to send to.');
+          }
+
+          const body = {
+            source_account_id: Number(this.pay.source),
+            destination_account_id: dest,
+            amount: this.pay.amount.trim(),
+            description: this.pay.desc.trim(),
+          };
+
+          // Same payment, same key: a double-click or retry can never pay twice.
+          // Edit any field and the payment gets a fresh key.
+          const sig = JSON.stringify(body);
+          if (sig !== this.pay.sig) {
+            this.pay.sig = sig;
+            this.pay.key = this.uuid();
+          }
+
+          await this.api('/transactions', {
+            method: 'POST',
+            body,
+            headers: { 'Idempotency-Key': this.pay.key },
+          });
+
+          this.pay.key = null;
+          this.pay.sig = null;
+          this.go('home');
+          this.notice = 'Payment sent.';
+          await this.loadAccounts();
+        });
+      },
+
+      async openHistory(account) {
+        this.current = account;
+        this.activity = [];
+        this.activityLoaded = false;
+        this.go('history');
+        await this.run(async () => {
+          this.activity = await this.api(`/accounts/${account.id}/transactions`);
+          this.activityLoaded = true;
+        });
+      },
+
+      // ---- formatting (string-based: money is never turned into a float) ----
+      isNeg(v) {
+        return v !== undefined && v !== null && String(v).startsWith('-');
+      },
+
+      fmt(v) {
+        if (v === undefined || v === null) return '—';
+        let s = typeof v === 'number' ? v.toFixed(2) : String(v);
+        const neg = s.startsWith('-');
+        if (neg) s = s.slice(1);
+        let [whole, frac = ''] = s.split('.');
+        frac = frac.padEnd(2, '0');
+        whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return (neg ? '-' : '') + whole + '.' + frac;
+      },
+
+      signed(v) {
+        const s = this.fmt(v);
+        return s.startsWith('-') ? '\u2212' + s.slice(1) : '+' + s;
+      },
+
+      when(iso) {
+        return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      },
+
+      uuid() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+      },
+    };
+  }
+</script>
+</body>
+</html>

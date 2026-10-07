@@ -18,6 +18,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use metrics::{counter, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
@@ -48,6 +49,10 @@ pub fn setup_metrics() -> PrometheusHandle {
     .clone()
 }
 
+async fn index() -> axum::response::Html<&'static str> {
+  axum::response::Html(include_str!("../../static/index.html"))
+}
+
 pub fn router(state: AppState, prometheus: PrometheusHandle) -> Router {
   let trace_layer = TraceLayer::new_for_http()
     .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -68,12 +73,14 @@ pub fn router(state: AppState, prometheus: PrometheusHandle) -> Router {
     // Transactions
     .route("/transactions", post(transactions::transfer))
     .route("/transactions/{id}/reversal", post(transactions::reverse))
+    .route("/accounts/{id}/transactions", get(accounts::get_activity))
     .route_layer(axum::middleware::from_fn_with_state(
       state.clone(),
       auth_middleware,
     ));
 
   let public = Router::new()
+    .route("/", get(index))
     .route("/health/live", get(health::liveness))
     .route("/health/ready", get(health::readiness))
     .route("/users/register", post(users::register))
@@ -89,6 +96,7 @@ pub fn router(state: AppState, prometheus: PrometheusHandle) -> Router {
     .merge(metrics)
     .layer(axum::middleware::from_fn(track_metrics))
     .layer(trace_layer)
+    .layer(CorsLayer::permissive())
     .with_state(state)
 }
 

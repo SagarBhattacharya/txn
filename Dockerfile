@@ -20,6 +20,7 @@ RUN rm -rf src
 
 # Copy real source code and migrations
 COPY src ./src
+COPY static ./static
 COPY migrations ./migrations
 
 # Invalidate dummy artifacts and build real binary

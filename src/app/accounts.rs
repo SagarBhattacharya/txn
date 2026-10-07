@@ -12,7 +12,7 @@ use crate::core::errors::AppResult;
 use crate::core::ledger;
 use crate::core::types::AccountName;
 use crate::db::queries::Query;
-use crate::db::rows::{Account, AccountType};
+use crate::db::rows::{Account, AccountActivity, AccountType};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateAccountPayload {
@@ -72,4 +72,13 @@ pub async fn get_balance(
     account_id: id,
     balance,
   }))
+}
+
+pub async fn get_activity(
+  user: AuthUser, 
+  Path(id): Path<i32>, 
+  State(state): State<AppState>
+) -> AppResult<Json<Vec<AccountActivity>>> {
+  ledger::owned_account(&state.pool, id, user.id).await?;
+  Ok(Json(Query::get_account_activity(&state.pool, id).await?))
 }
