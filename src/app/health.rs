@@ -1,8 +1,7 @@
-use crate::app::{health, AppState};
+use crate::app::AppState;
 use crate::db;
-use axum::{extract::State, http::StatusCode, Router};
 use axum::routing::get;
-use metrics_exporter_prometheus::PrometheusHandle;
+use axum::{Router, extract::State, http::StatusCode};
 
 pub fn router() -> Router<AppState> {
   Router::new()

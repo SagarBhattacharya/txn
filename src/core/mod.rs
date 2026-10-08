@@ -1,13 +1,13 @@
+use crate::core::errors::Error;
 use envconfig::Envconfig;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
-use crate::core::errors::Error;
 
+pub mod auth;
 pub mod errors;
 pub mod ledger;
 pub mod types;
-pub mod auth;
 
 pub fn init_tracing() {
   let filter = EnvFilter::try_from_default_env()
@@ -48,7 +48,8 @@ impl Config {
     if cfg.jwt_secret.trim().len() < 32 {
       return Err(Error::Internal(
         "JWT_SECRET_KEY must be at least 32 characters \
-        long for cryptographic security".into(),
+        long for cryptographic security"
+          .into(),
       ));
     }
 

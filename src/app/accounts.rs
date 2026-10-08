@@ -1,9 +1,13 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json, Router};
 use axum::routing::{get, post};
+use axum::{
+  Json, Router,
+  extract::{Path, State},
+  http::StatusCode,
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::app::{accounts, AppJson, AppState};
+use crate::app::{AppJson, AppState};
 use crate::core::auth::AuthUser;
 use crate::core::errors::AppResult;
 use crate::core::ledger;

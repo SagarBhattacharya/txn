@@ -148,7 +148,9 @@ mod tests {
     let user_id = 101;
 
     let token = keys.issue(user_id).expect("issuing JWT should succeed");
-    let claims = keys.verify(&token).expect("verifying valid JWT should succeed");
+    let claims = keys
+      .verify(&token)
+      .expect("verifying valid JWT should succeed");
 
     assert_eq!(claims.sub, user_id);
     assert!(claims.exp > claims.iat);
@@ -159,7 +161,9 @@ mod tests {
     let keys_signer = JwtKeys::new("signing-secret-key-at-least-32-bytes-long");
     let keys_verifier = JwtKeys::new("different-secret-key-at-least-32-bytes-long");
 
-    let token = keys_signer.issue(101).expect("issuing token should succeed");
+    let token = keys_signer
+      .issue(101)
+      .expect("issuing token should succeed");
     let result = keys_verifier.verify(&token);
 
     assert!(matches!(result, Err(Error::Unauthorized(_))));
@@ -183,7 +187,7 @@ mod tests {
       &expired_claims,
       &EncodingKey::from_secret(secret.as_bytes()),
     )
-      .expect("encoding expired token should succeed");
+    .expect("encoding expired token should succeed");
 
     let result = keys.verify(&token);
     assert!(matches!(result, Err(Error::Unauthorized(_))));

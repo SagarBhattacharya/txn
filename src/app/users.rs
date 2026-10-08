@@ -1,10 +1,10 @@
 use axum::http::StatusCode;
-use axum::{extract::State, Json, Router};
 use axum::routing::post;
+use axum::{Json, Router, extract::State};
 use serde::{Deserialize, Serialize};
 
-use crate::app::{users, AppJson, AppState};
-use crate::core::auth::{JwtKeys, hash_password, verify_login};
+use crate::app::{AppJson, AppState};
+use crate::core::auth::{hash_password, verify_login};
 use crate::core::errors::{AppResult, Error};
 use crate::core::types::{Password, Username};
 use crate::db;
@@ -42,11 +42,14 @@ async fn register(
   let user = db::create_user(&state.pool, payload.username.as_str(), &hash).await?;
 
   let token = state.jwt.issue(user.id)?;
-  Ok((StatusCode::CREATED, Json(AuthResponse{
-    user_id: user.id,
-    username: user.username,
-    token,
-  })))
+  Ok((
+    StatusCode::CREATED,
+    Json(AuthResponse {
+      user_id: user.id,
+      username: user.username,
+      token,
+    }),
+  ))
 }
 
 async fn login(
@@ -61,7 +64,7 @@ async fn login(
 
   let user = user.expect("verified user must exist");
   let token = state.jwt.issue(user.id)?;
-  Ok(Json(AuthResponse{
+  Ok(Json(AuthResponse {
     user_id: user.id,
     username: user.username,
     token,

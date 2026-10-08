@@ -92,9 +92,9 @@ impl Error {
 
       Self::Conflict(_) => StatusCode::CONFLICT,
 
-      Self::InsufficientFunds { .. }
-      | Self::AlreadyReversed
-      | Self::IdempotencyPayloadMismatch => StatusCode::UNPROCESSABLE_ENTITY,
+      Self::InsufficientFunds { .. } | Self::AlreadyReversed | Self::IdempotencyPayloadMismatch => {
+        StatusCode::UNPROCESSABLE_ENTITY
+      }
 
       Self::Database(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }

@@ -16,25 +16,22 @@ pub async fn create_user(
 			returning *
 		"#,
   )
-    .bind(username)
-    .bind(password_hash)
-    .fetch_one(ex)
-    .await
+  .bind(username)
+  .bind(password_hash)
+  .fetch_one(ex)
+  .await
 }
 
-pub async fn get_user_by_username(
-  ex: impl PgExecutor<'_>,
-  username: &str,
-) -> Result<Option<User>> {
+pub async fn get_user_by_username(ex: impl PgExecutor<'_>, username: &str) -> Result<Option<User>> {
   sqlx::query_as(
     r#"
 			select * from users
 			where username = $1
     "#,
   )
-    .bind(username)
-    .fetch_optional(ex)
-    .await
+  .bind(username)
+  .fetch_optional(ex)
+  .await
 }
 
 pub async fn create_account(
@@ -50,11 +47,11 @@ pub async fn create_account(
 			returning *
 		"#,
   )
-    .bind(owner_id)
-    .bind(name)
-    .bind(atype)
-    .fetch_one(ex)
-    .await
+  .bind(owner_id)
+  .bind(name)
+  .bind(atype)
+  .fetch_one(ex)
+  .await
 }
 
 pub async fn get_account(ex: impl PgExecutor<'_>, id: i32) -> Result<Option<Account>> {
@@ -64,9 +61,9 @@ pub async fn get_account(ex: impl PgExecutor<'_>, id: i32) -> Result<Option<Acco
 			from accounts where id = $1
 		"#,
   )
-    .bind(id)
-    .fetch_optional(ex)
-    .await
+  .bind(id)
+  .fetch_optional(ex)
+  .await
 }
 
 pub async fn get_accounts_by_owner<'e>(
@@ -81,9 +78,9 @@ pub async fn get_accounts_by_owner<'e>(
 			order by id
 		"#,
   )
-    .bind(owner_id)
-    .fetch_all(ex)
-    .await
+  .bind(owner_id)
+  .fetch_all(ex)
+  .await
 }
 
 pub async fn get_all_balances(
@@ -98,9 +95,9 @@ pub async fn get_all_balances(
     	group by account_id
     "#,
   )
-    .bind(account_ids)
-    .fetch_all(ex)
-    .await?;
+  .bind(account_ids)
+  .fetch_all(ex)
+  .await?;
 
   Ok(rows.into_iter().map(|r| (r.0, r.1)).collect())
 }
@@ -113,9 +110,9 @@ pub async fn get_balance(ex: impl PgExecutor<'_>, account_id: i32) -> Result<Dec
 			where account_id = $1
 		"#,
   )
-    .bind(account_id)
-    .fetch_one(ex)
-    .await
+  .bind(account_id)
+  .fetch_one(ex)
+  .await
 }
 
 pub async fn lock_accounts(
@@ -129,9 +126,9 @@ pub async fn lock_accounts(
 			order by id for update
 		"#,
   )
-    .bind(account_ids)
-    .fetch_all(ex)
-    .await?;
+  .bind(account_ids)
+  .fetch_all(ex)
+  .await?;
 
   Ok(rows.into_iter().map(|r| (r.0, r.1)).collect())
 }
@@ -152,11 +149,11 @@ pub async fn insert_entries(
 			select * from unnest($1::int[], $2::int[], $3::numeric[])
 		"#,
   )
-    .bind(&txn_ids)
-    .bind(&account_ids)
-    .bind(&amounts)
-    .execute(ex)
-    .await?;
+  .bind(&txn_ids)
+  .bind(&account_ids)
+  .bind(&amounts)
+  .execute(ex)
+  .await?;
 
   Ok(())
 }
@@ -172,16 +169,13 @@ pub async fn get_transaction_by_user_and_key(
 	    where user_id = $1 AND idempotency_key = $2
 	  "#,
   )
-    .bind(user_id)
-    .bind(key)
-    .fetch_optional(ex)
-    .await
+  .bind(user_id)
+  .bind(key)
+  .fetch_optional(ex)
+  .await
 }
 
-pub async fn lock_transaction(
-  ex: impl PgExecutor<'_>,
-  txn_id: i32,
-) -> Result<Option<Transaction>> {
+pub async fn lock_transaction(ex: impl PgExecutor<'_>, txn_id: i32) -> Result<Option<Transaction>> {
   sqlx::query_as(
     r#"
 			select *
@@ -189,9 +183,9 @@ pub async fn lock_transaction(
 			where id = $1 for update
 		"#,
   )
-    .bind(txn_id)
-    .fetch_optional(ex)
-    .await
+  .bind(txn_id)
+  .fetch_optional(ex)
+  .await
 }
 
 pub async fn insert_transaction(
@@ -211,13 +205,13 @@ pub async fn insert_transaction(
 			returning *
     "#,
   )
-    .bind(user_id)
-    .bind(description)
-    .bind(idempotency_key)
-    .bind(request_hash)
-    .bind(reversed_transaction_id)
-    .fetch_one(ex)
-    .await
+  .bind(user_id)
+  .bind(description)
+  .bind(idempotency_key)
+  .bind(request_hash)
+  .bind(reversed_transaction_id)
+  .fetch_one(ex)
+  .await
 }
 
 pub async fn acquire_idempotency_lock(
@@ -240,9 +234,9 @@ pub async fn is_reversed(ex: impl PgExecutor<'_>, txn_id: i32) -> Result<bool> {
 			where reversed_transaction_id = $1
 		"#,
   )
-    .bind(txn_id)
-    .fetch_optional(ex)
-    .await?;
+  .bind(txn_id)
+  .fetch_optional(ex)
+  .await?;
 
   Ok(rev_id.is_some())
 }
@@ -260,9 +254,9 @@ pub async fn get_entries_with_owner(
 	    order by e.id
 	  "#,
   )
-    .bind(txn_id)
-    .fetch_all(ex)
-    .await
+  .bind(txn_id)
+  .fetch_all(ex)
+  .await
 }
 
 pub async fn get_account_activity(
@@ -280,7 +274,7 @@ pub async fn get_account_activity(
       limit 50
     "#,
   )
-    .bind(account_id)
-    .fetch_all(ex)
-    .await
+  .bind(account_id)
+  .fetch_all(ex)
+  .await
 }

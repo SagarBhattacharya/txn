@@ -1,8 +1,12 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json, Router};
 use axum::routing::post;
+use axum::{
+  Json, Router,
+  extract::{Path, State},
+  http::StatusCode,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::app::{transactions, AppJson, AppState};
+use crate::app::{AppJson, AppState};
 use crate::core::auth::AuthUser;
 use crate::core::errors::AppResult;
 use crate::core::ledger;

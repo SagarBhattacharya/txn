@@ -1,22 +1,20 @@
 mod accounts;
 mod health;
+mod metrics;
 mod transactions;
 mod users;
-mod metrics;
 
 use crate::core::auth::{JwtKeys, auth_middleware};
 use crate::core::errors::{AppResult, Error};
 use crate::core::types::IdempotencyKey;
-use axum::{middleware, Router};
-use axum::extract::{
-  FromRequest, FromRequestParts, Request, rejection::JsonRejection,
-};
+use axum::extract::{FromRequest, FromRequestParts, Request, rejection::JsonRejection};
 use axum::http::request::Parts;
+use axum::response::Html;
 use axum::routing::get;
+use axum::{Router, middleware};
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::PgPool;
 use std::sync::Arc;
-use axum::response::Html;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
@@ -30,15 +28,16 @@ pub struct AppState {
 impl AppState {
   pub fn new(pool: PgPool, jwt: Arc<JwtKeys>) -> Self {
     Self {
-      pool, jwt,
-      prometheus: metrics::setup()
+      pool,
+      jwt,
+      prometheus: metrics::setup(),
     }
   }
 }
 
 pub struct App {
   state: AppState,
-  router: Router
+  router: Router,
 }
 
 impl App {
@@ -55,7 +54,8 @@ impl App {
       .nest("/accounts", accounts::router())
       .nest("/transactions", transactions::router())
       .route_layer(middleware::from_fn_with_state(
-        state.clone(), auth_middleware,
+        state.clone(),
+        auth_middleware,
       ));
 
     let public = Router::new()

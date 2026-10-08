@@ -5,8 +5,8 @@ use sqlx::postgres::PgPoolOptions;
 mod queries;
 pub mod rows;
 
-pub use queries::*;
 use crate::core::Config;
+pub use queries::*;
 
 pub async fn connect(config: &Config) -> AppResult<PgPool> {
   let pool = PgPoolOptions::new()

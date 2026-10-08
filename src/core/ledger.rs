@@ -231,7 +231,7 @@ pub(super) fn check_accounts_and_overdraft(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::core::types::{Amount};
+  use crate::core::types::Amount;
   use crate::db::rows::EntryWithOwner;
   use rust_decimal::dec;
 
@@ -284,10 +284,10 @@ mod tests {
     let res = check_accounts_and_overdraft(&entries, &accounts, &balances);
     match res {
       Err(Error::InsufficientFunds {
-            account_id,
-            required,
-            available,
-          }) => {
+        account_id,
+        required,
+        available,
+      }) => {
         assert_eq!(account_id, 1);
         assert_eq!(required, dec!(100.00));
         assert_eq!(available, dec!(99.99));
@@ -311,10 +311,10 @@ mod tests {
     let res = check_accounts_and_overdraft(&entries, &accounts, &empty_balances);
     match res {
       Err(Error::InsufficientFunds {
-            account_id,
-            required,
-            available,
-          }) => {
+        account_id,
+        required,
+        available,
+      }) => {
         assert_eq!(account_id, 1);
         assert_eq!(required, dec!(10.00));
         assert_eq!(available, dec!(0.00));

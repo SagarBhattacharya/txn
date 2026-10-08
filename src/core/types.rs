@@ -259,14 +259,26 @@ mod tests {
     assert!(Amount::try_from(dec!(9999999999.99)).is_ok());
 
     // Invalid: zero or negative
-    assert!(matches!(Amount::try_from(dec!(0.00)), Err(Error::BadRequest(_))));
-    assert!(matches!(Amount::try_from(dec!(-5.00)), Err(Error::BadRequest(_))));
+    assert!(matches!(
+      Amount::try_from(dec!(0.00)),
+      Err(Error::BadRequest(_))
+    ));
+    assert!(matches!(
+      Amount::try_from(dec!(-5.00)),
+      Err(Error::BadRequest(_))
+    ));
 
     // Invalid: sub-cent precision (> 2 decimal places after normalization)
-    assert!(matches!(Amount::try_from(dec!(10.005)), Err(Error::BadRequest(_))));
+    assert!(matches!(
+      Amount::try_from(dec!(10.005)),
+      Err(Error::BadRequest(_))
+    ));
 
     // Invalid: exceeds MAX_AMOUNT
-    assert!(matches!(Amount::try_from(dec!(10000000000.00)), Err(Error::BadRequest(_))));
+    assert!(matches!(
+      Amount::try_from(dec!(10000000000.00)),
+      Err(Error::BadRequest(_))
+    ));
   }
 
   #[test]
@@ -274,19 +286,30 @@ mod tests {
     // Note bounds: 1..=256
     assert!(Note::from_str("").is_err());
     assert!(Note::from_str("   ").is_err());
-    assert_eq!(Note::from_str("  Transfer for dinner  ").unwrap().as_str(), "Transfer for dinner");
+    assert_eq!(
+      Note::from_str("  Transfer for dinner  ").unwrap().as_str(),
+      "Transfer for dinner"
+    );
     assert!(Note::from_str(&"a".repeat(256)).is_ok());
     assert!(Note::from_str(&"a".repeat(257)).is_err());
 
     // AccountName bounds: 1..=128
     assert!(AccountName::from_str("").is_err());
-    assert_eq!(AccountName::from_str("  Checking  ").unwrap().as_str(), "Checking");
+    assert_eq!(
+      AccountName::from_str("  Checking  ").unwrap().as_str(),
+      "Checking"
+    );
     assert!(AccountName::from_str(&"a".repeat(128)).is_ok());
     assert!(AccountName::from_str(&"a".repeat(129)).is_err());
 
     // IdempotencyKey bounds: 1..=128
     assert!(IdempotencyKey::from_str("").is_err());
-    assert_eq!(IdempotencyKey::from_str("  txn-uuid-1234  ").unwrap().as_str(), "txn-uuid-1234");
+    assert_eq!(
+      IdempotencyKey::from_str("  txn-uuid-1234  ")
+        .unwrap()
+        .as_str(),
+      "txn-uuid-1234"
+    );
     assert!(IdempotencyKey::from_str(&"k".repeat(128)).is_ok());
     assert!(IdempotencyKey::from_str(&"k".repeat(129)).is_err());
   }
@@ -295,7 +318,12 @@ mod tests {
   fn test_username_validation() {
     // Valid: 3..=64 characters, alphanumeric and underscore
     assert!(Username::try_from("alice_01".to_string()).is_ok());
-    assert_eq!(Username::try_from("  bob_smith  ".to_string()).unwrap().as_str(), "bob_smith");
+    assert_eq!(
+      Username::try_from("  bob_smith  ".to_string())
+        .unwrap()
+        .as_str(),
+      "bob_smith"
+    );
 
     // Invalid lengths
     assert!(Username::try_from("ab".to_string()).is_err());
@@ -371,7 +399,10 @@ mod tests {
     ));
 
     // Error: zero amount posting
-    let zero_entry = NewEntry { account_id: 2, amount: Decimal::ZERO };
+    let zero_entry = NewEntry {
+      account_id: 2,
+      amount: Decimal::ZERO,
+    };
     assert!(matches!(
       Entries::new(vec![zero_entry, in_entry.clone()]),
       Err(Error::ZeroAmountPosting)
@@ -387,7 +418,10 @@ mod tests {
     // Error: unbalanced entries
     let unbalanced = vec![
       NewEntry::outflow(1, amt),
-      NewEntry { account_id: 2, amount: dec!(99.99) },
+      NewEntry {
+        account_id: 2,
+        amount: dec!(99.99),
+      },
     ];
     assert!(matches!(
       Entries::new(unbalanced),
