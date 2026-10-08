@@ -7,9 +7,10 @@ WORKDIR /app
 
 # 1. Cache dependency build
 COPY Cargo.toml Cargo.lock ./
+COPY benches ./benches
+
 RUN mkdir -p src \
     && echo "fn main() {}" > src/main.rs \
-    && echo "" > src/lib.rs \
     && cargo build --release --bin txn \
     && rm -rf src target/release/deps/txn* target/release/txn*
 

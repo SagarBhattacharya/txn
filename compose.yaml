@@ -41,5 +41,59 @@ services:
       retries: 3
       start_period: 2s
 
+  postgres-bench:
+    image: postgres:18-alpine
+    container_name: txn-pg-bench
+    profiles:
+      - bench
+    environment:
+      POSTGRES_USER: ledger_user
+      POSTGRES_PASSWORD: ledger_secret
+      POSTGRES_DB: ledger_bench
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_bench_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ledger_user -d ledger_bench"
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  txn-bench:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: txn-bench
+    profiles:
+      - bench
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgres://ledger_user:ledger_secret@postgres-bench:5432/ledger_bench
+      SERVER_PORT: "8000"
+      MAX_DB_CONNECTIONS: "10"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-7MZ4hse4tkPrEpcQo2zzFvWPtHmRxDdmIIASHTC0SY2}
+      RUST_LOG: "warn"
+    depends_on:
+      postgres-bench:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:8000/health/ready || exit 1"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+
+
 volumes:
   pg_data:
+  pg_bench_data:

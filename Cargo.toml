@@ -49,7 +49,33 @@ features = [
 uuid = { version = "1.27.0", features = ["v4"] }
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }
+hdrhistogram = "7.6.0"
+reqwest = { version = "0.13.5", features = ["json"] }
 
 [profile.release]
 strip = true
 lto = "thin"
+
+[[bench]]
+name = "transfer"
+harness = false
+
+[[bench]]
+name = "contention"
+harness = false
+
+[[bench]]
+name = "idempotency"
+harness = false
+
+[[bench]]
+name = "reversal"
+harness = false
+
+[[bench]]
+name = "reads"
+harness = false
+
+[[bench]]
+name = "history"
+harness = false
