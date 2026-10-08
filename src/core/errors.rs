@@ -59,8 +59,8 @@ pub enum Error {
     available: Decimal,
   },
 
-  #[error("Transaction {0} has already been reversed")]
-  AlreadyReversed(i32),
+  #[error("Transaction has already been reversed")]
+  AlreadyReversed,
 
   #[error("Idempotency key replayed with mismatched request payload")]
   IdempotencyPayloadMismatch,
@@ -93,7 +93,7 @@ impl Error {
       Self::Conflict(_) => StatusCode::CONFLICT,
 
       Self::InsufficientFunds { .. }
-      | Self::AlreadyReversed(_)
+      | Self::AlreadyReversed
       | Self::IdempotencyPayloadMismatch => StatusCode::UNPROCESSABLE_ENTITY,
 
       Self::Database(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -112,7 +112,7 @@ impl From<sqlx::Error> for Error {
           return Error::Conflict("Account name already exists for this user".into());
         }
         Some("uq_transactions_single_reversal") => {
-          return Error::AlreadyReversed(0);
+          return Error::AlreadyReversed;
         }
         _ => {}
       }

@@ -1,6 +1,6 @@
 use crate::core::errors::{AppResult, Error};
 use crate::core::types::{Entries, Fingerprint, IdempotencyKey, ReverseCmd, TransferCmd};
-use crate::db::queries::Query;
+use crate::db;
 use crate::db::rows::{Account, AccountType};
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -14,7 +14,7 @@ pub async fn owned_account(
   account_id: i32,
   user_id: UserId,
 ) -> AppResult<Account> {
-  let account = Query::get_account(ex, account_id)
+  let account = db::get_account(ex, account_id)
     .await?
     .ok_or(Error::AccountNotFound(account_id))?;
 
@@ -94,11 +94,11 @@ pub async fn reverse(
     Begin::Fresh(tx) => tx,
   };
 
-  let target = Query::lock_transaction(&mut *tx, cmd.target)
+  let target = db::lock_transaction(&mut *tx, cmd.target)
     .await?
     .ok_or(Error::TransactionNotFound(cmd.target))?;
 
-  let entries = Query::get_entries_with_owner(&mut *tx, cmd.target).await?;
+  let entries = db::get_entries_with_owner(&mut *tx, cmd.target).await?;
 
   if !entries.iter().any(|e| e.owner_id == user) {
     return Err(Error::Forbidden(
@@ -110,8 +110,8 @@ pub async fn reverse(
     return Err(Error::CannotReverseReversal(cmd.target));
   }
 
-  if Query::is_reversed(&mut *tx, cmd.target).await? {
-    return Err(Error::AlreadyReversed(cmd.target));
+  if db::is_reversed(&mut *tx, cmd.target).await? {
+    return Err(Error::AlreadyReversed);
   }
 
   let desc = format!("Reversal of Txn #{}: {}", cmd.target, cmd.reason.as_str());
@@ -153,10 +153,10 @@ async fn begin_idempotent(
   let mut tx = pool.begin().await?;
 
   // 1. Advisory lock scoped to (user, key)
-  Query::acquire_idempotency_lock(&mut *tx, user, key.as_str()).await?;
+  db::acquire_idempotency_lock(&mut *tx, user, key.as_str()).await?;
 
   // 2. Replay check
-  match Query::get_transaction_by_user_and_key(&mut *tx, user, key.as_str()).await? {
+  match db::get_transaction_by_user_and_key(&mut *tx, user, key.as_str()).await? {
     None => Ok(Begin::Fresh(tx)),
     Some(prev) if fp.matches(&prev.request_hash) => {
       metrics::counter!("ledger_idempotent_replays_total").increment(1);
@@ -173,11 +173,11 @@ async fn post(
   entries: Entries,
 ) -> AppResult<TxnId> {
   let account_ids = entries.account_ids();
-  let accounts = Query::lock_accounts(&mut **tx, &account_ids).await?;
-  let balances = Query::get_all_balances(&mut **tx, &account_ids).await?;
+  let accounts = db::lock_accounts(&mut **tx, &account_ids).await?;
+  let balances = db::get_all_balances(&mut **tx, &account_ids).await?;
   check_accounts_and_overdraft(&entries, &accounts, &balances)?;
 
-  let txn = Query::insert_transaction(
+  let txn = db::insert_transaction(
     &mut **tx,
     header.user_id,
     header.description,
@@ -188,11 +188,11 @@ async fn post(
   .await?;
 
   // 5. Batch insert entries
-  Query::insert_entries(&mut **tx, txn.id, entries).await?;
+  db::insert_entries(&mut **tx, txn.id, entries).await?;
   Ok(txn.id)
 }
 
-fn check_accounts_and_overdraft(
+pub(super) fn check_accounts_and_overdraft(
   entries: &Entries,
   accounts: &HashMap<i32, AccountType>,
   balances: &HashMap<i32, Decimal>,
@@ -226,4 +226,140 @@ fn check_accounts_and_overdraft(
     }
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::core::types::{Amount};
+  use crate::db::rows::EntryWithOwner;
+  use rust_decimal::dec;
+
+  fn sample_entries(from: i32, to: i32, amount: Amount) -> Entries {
+    Entries::transfer(from, to, amount).expect("valid transfer entries")
+  }
+
+  #[test]
+  fn test_check_accounts_and_overdraft_missing_account() {
+    let amt = Amount::try_from(dec!(50.00)).unwrap();
+    let entries = sample_entries(1, 2, amt);
+
+    // Only account 1 is provided; account 2 is missing
+    let mut accounts = HashMap::new();
+    accounts.insert(1, AccountType::Asset);
+
+    let balances = HashMap::from([(1, dec!(100.00))]);
+
+    let res = check_accounts_and_overdraft(&entries, &accounts, &balances);
+    assert!(matches!(res, Err(Error::AccountNotFound(2))));
+  }
+
+  #[test]
+  fn test_check_accounts_and_overdraft_exact_balance_passes() {
+    let amt = Amount::try_from(dec!(100.00)).unwrap();
+    let entries = sample_entries(1, 2, amt);
+
+    let mut accounts = HashMap::new();
+    accounts.insert(1, AccountType::Asset);
+    accounts.insert(2, AccountType::Asset);
+
+    // Account 1 has exactly 100.00 available
+    let balances = HashMap::from([(1, dec!(100.00)), (2, dec!(0.00))]);
+
+    assert!(check_accounts_and_overdraft(&entries, &accounts, &balances).is_ok());
+  }
+
+  #[test]
+  fn test_check_accounts_and_overdraft_one_cent_short_fails() {
+    let amt = Amount::try_from(dec!(100.00)).unwrap();
+    let entries = sample_entries(1, 2, amt);
+
+    let mut accounts = HashMap::new();
+    accounts.insert(1, AccountType::Asset);
+    accounts.insert(2, AccountType::Asset);
+
+    // Account 1 only has 99.99
+    let balances = HashMap::from([(1, dec!(99.99)), (2, dec!(0.00))]);
+
+    let res = check_accounts_and_overdraft(&entries, &accounts, &balances);
+    match res {
+      Err(Error::InsufficientFunds {
+            account_id,
+            required,
+            available,
+          }) => {
+        assert_eq!(account_id, 1);
+        assert_eq!(required, dec!(100.00));
+        assert_eq!(available, dec!(99.99));
+      }
+      other => panic!("expected InsufficientFunds error, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn test_check_accounts_and_overdraft_defaults_missing_balance_to_zero() {
+    let amt = Amount::try_from(dec!(10.00)).unwrap();
+    let entries = sample_entries(1, 2, amt);
+
+    let mut accounts = HashMap::new();
+    accounts.insert(1, AccountType::Asset);
+    accounts.insert(2, AccountType::Asset);
+
+    // No balance record exists in map for account 1
+    let empty_balances = HashMap::new();
+
+    let res = check_accounts_and_overdraft(&entries, &accounts, &empty_balances);
+    match res {
+      Err(Error::InsufficientFunds {
+            account_id,
+            required,
+            available,
+          }) => {
+        assert_eq!(account_id, 1);
+        assert_eq!(required, dec!(10.00));
+        assert_eq!(available, dec!(0.00));
+      }
+      other => panic!("expected InsufficientFunds error, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn test_check_accounts_and_overdraft_allows_negative_on_exempt_accounts() {
+    let amt = Amount::try_from(dec!(500.00)).unwrap();
+    let entries = sample_entries(1, 2, amt);
+
+    // Account 1 is Equity, which allows negative balances
+    let mut accounts = HashMap::new();
+    accounts.insert(1, AccountType::Equity);
+    accounts.insert(2, AccountType::Asset);
+
+    let balances = HashMap::from([(1, dec!(0.00)), (2, dec!(0.00))]);
+
+    assert!(check_accounts_and_overdraft(&entries, &accounts, &balances).is_ok());
+  }
+
+  #[test]
+  fn test_reversal_entry_inversion_maintains_balance() {
+    let original = vec![
+      EntryWithOwner {
+        account_id: 10,
+        owner_id: 1,
+        amount: dec!(-45.50),
+      },
+      EntryWithOwner {
+        account_id: 20,
+        owner_id: 2,
+        amount: dec!(45.50),
+      },
+    ];
+
+    let inverted = Entries::inverse_of(&original).expect("inversion succeeds");
+    let slice = inverted.as_slice();
+
+    assert_eq!(slice.len(), 2);
+    assert_eq!(slice[0].account_id, 10);
+    assert_eq!(slice[0].amount, dec!(45.50));
+    assert_eq!(slice[1].account_id, 20);
+    assert_eq!(slice[1].amount, dec!(-45.50));
+  }
 }

@@ -22,8 +22,7 @@ pub struct ReverseCmd {
   pub reason: Note,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(transparent)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint(pub Vec<u8>);
 
 impl Fingerprint {
@@ -73,7 +72,7 @@ impl TryFrom<Decimal> for Amount {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewEntry {
   pub account_id: i32,
   pub amount: Decimal,
@@ -95,7 +94,7 @@ impl NewEntry {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entries(Vec<NewEntry>);
 
 impl Entries {
@@ -244,4 +243,155 @@ fn trimmed(raw: String, min: usize, max: usize, field_name: &str) -> AppResult<S
   }
 
   Ok(s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::str::FromStr;
+
+  #[test]
+  fn test_amount_validation() {
+    // Valid: positive, scale <= 2, within MAX_AMOUNT limit
+    assert!(Amount::try_from(dec!(0.01)).is_ok());
+    assert!(Amount::try_from(dec!(100.50)).is_ok());
+    assert!(Amount::try_from(dec!(100.000)).is_ok()); // Normalizes to 100
+    assert!(Amount::try_from(dec!(9999999999.99)).is_ok());
+
+    // Invalid: zero or negative
+    assert!(matches!(Amount::try_from(dec!(0.00)), Err(Error::BadRequest(_))));
+    assert!(matches!(Amount::try_from(dec!(-5.00)), Err(Error::BadRequest(_))));
+
+    // Invalid: sub-cent precision (> 2 decimal places after normalization)
+    assert!(matches!(Amount::try_from(dec!(10.005)), Err(Error::BadRequest(_))));
+
+    // Invalid: exceeds MAX_AMOUNT
+    assert!(matches!(Amount::try_from(dec!(10000000000.00)), Err(Error::BadRequest(_))));
+  }
+
+  #[test]
+  fn test_text_newtypes_trimming_and_bounds() {
+    // Note bounds: 1..=256
+    assert!(Note::from_str("").is_err());
+    assert!(Note::from_str("   ").is_err());
+    assert_eq!(Note::from_str("  Transfer for dinner  ").unwrap().as_str(), "Transfer for dinner");
+    assert!(Note::from_str(&"a".repeat(256)).is_ok());
+    assert!(Note::from_str(&"a".repeat(257)).is_err());
+
+    // AccountName bounds: 1..=128
+    assert!(AccountName::from_str("").is_err());
+    assert_eq!(AccountName::from_str("  Checking  ").unwrap().as_str(), "Checking");
+    assert!(AccountName::from_str(&"a".repeat(128)).is_ok());
+    assert!(AccountName::from_str(&"a".repeat(129)).is_err());
+
+    // IdempotencyKey bounds: 1..=128
+    assert!(IdempotencyKey::from_str("").is_err());
+    assert_eq!(IdempotencyKey::from_str("  txn-uuid-1234  ").unwrap().as_str(), "txn-uuid-1234");
+    assert!(IdempotencyKey::from_str(&"k".repeat(128)).is_ok());
+    assert!(IdempotencyKey::from_str(&"k".repeat(129)).is_err());
+  }
+
+  #[test]
+  fn test_username_validation() {
+    // Valid: 3..=64 characters, alphanumeric and underscore
+    assert!(Username::try_from("alice_01".to_string()).is_ok());
+    assert_eq!(Username::try_from("  bob_smith  ".to_string()).unwrap().as_str(), "bob_smith");
+
+    // Invalid lengths
+    assert!(Username::try_from("ab".to_string()).is_err());
+    assert!(Username::try_from("a".repeat(65)).is_err());
+
+    // Invalid characters
+    assert!(Username::try_from("alice-smith".to_string()).is_err());
+    assert!(Username::try_from("alice@mail".to_string()).is_err());
+    assert!(Username::try_from("alice space".to_string()).is_err());
+  }
+
+  #[test]
+  fn test_password_validation_and_exposure() {
+    // Valid lengths: 8..=128 characters
+    let valid_pw = "pass1234".to_string();
+    let parsed = Password::try_from(valid_pw.clone()).expect("valid 8-char password");
+    assert_eq!(parsed.expose(), "pass1234");
+
+    // Invalid: under 8 characters
+    assert!(Password::try_from("short12".to_string()).is_err());
+
+    // Invalid: over 128 characters
+    assert!(Password::try_from("x".repeat(129)).is_err());
+  }
+
+  #[test]
+  fn test_fingerprint_deterministic_and_matches() {
+    let cmd1 = TransferCmd {
+      source_account_id: 1,
+      destination_account_id: 2,
+      amount: Amount::try_from(dec!(50.00)).unwrap(),
+      description: Note::from_str("Settlement").unwrap(),
+    };
+
+    let cmd2 = TransferCmd {
+      source_account_id: 1,
+      destination_account_id: 2,
+      amount: Amount::try_from(dec!(50.01)).unwrap(), // different amount
+      description: Note::from_str("Settlement").unwrap(),
+    };
+
+    let fp1 = Fingerprint::of("transfer", &cmd1);
+    let fp1_dup = Fingerprint::of("transfer", &cmd1);
+    let fp2 = Fingerprint::of("transfer", &cmd2);
+
+    assert_eq!(fp1, fp1_dup);
+    assert_ne!(fp1, fp2);
+    assert!(fp1.matches(fp1_dup.as_bytes()));
+    assert!(!fp1.matches(fp2.as_bytes()));
+  }
+
+  #[test]
+  fn test_entries_invariants_and_sorting() {
+    let amt = Amount::try_from(dec!(100.00)).unwrap();
+
+    // Outflow is negative, inflow is positive
+    let out_entry = NewEntry::outflow(3, amt);
+    let in_entry = NewEntry::inflow(1, amt);
+    assert_eq!(out_entry.amount, dec!(-100.00));
+    assert_eq!(in_entry.amount, dec!(100.00));
+
+    // Valid transfer entry creation
+    let entries = Entries::transfer(3, 1, amt).expect("valid transfer");
+    assert_eq!(entries.as_slice().len(), 2);
+
+    // Account IDs sorted unstably
+    assert_eq!(entries.account_ids(), vec![1, 3]);
+
+    // Error: fewer than 2 postings
+    assert!(matches!(
+      Entries::new(vec![out_entry.clone()]),
+      Err(Error::InsufficientPostings(1))
+    ));
+
+    // Error: zero amount posting
+    let zero_entry = NewEntry { account_id: 2, amount: Decimal::ZERO };
+    assert!(matches!(
+      Entries::new(vec![zero_entry, in_entry.clone()]),
+      Err(Error::ZeroAmountPosting)
+    ));
+
+    // Error: duplicate account ID
+    let dup_entries = vec![NewEntry::outflow(1, amt), NewEntry::inflow(1, amt)];
+    assert!(matches!(
+      Entries::new(dup_entries),
+      Err(Error::DuplicateAccountPosting)
+    ));
+
+    // Error: unbalanced entries
+    let unbalanced = vec![
+      NewEntry::outflow(1, amt),
+      NewEntry { account_id: 2, amount: dec!(99.99) },
+    ];
+    assert!(matches!(
+      Entries::new(unbalanced),
+      Err(Error::UnbalancedTransaction(_))
+    ));
+  }
 }

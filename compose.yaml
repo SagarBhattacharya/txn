@@ -34,17 +34,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
-  prometheus:
-    image: prom/prometheus:v2.51.0
-    container_name: txn-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    depends_on:
-      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 2s
 
 volumes:
   pg_data:

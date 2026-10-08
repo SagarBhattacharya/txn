@@ -1,50 +1,45 @@
-# syntax=docker/dockerfile:1
-
+# ==========================================
 # Stage 1: Build dependency cache & binary
+# ==========================================
 FROM rust:1.99-slim-bookworm AS builder
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Cache dependency layer separately from application code
+# 1. Cache dependency build
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release || true
-RUN rm -rf src
+RUN mkdir -p src \
+    && echo "fn main() {}" > src/main.rs \
+    && echo "" > src/lib.rs \
+    && cargo build --release --bin txn \
+    && rm -rf src target/release/deps/txn* target/release/txn*
 
-# Copy real source code and migrations
-COPY src ./src
-COPY static ./static
+# 2. Copy source, migrations (for sqlx::migrate!), and static assets
 COPY migrations ./migrations
+COPY static ./static
+COPY src ./src
 
-# Invalidate dummy artifacts and build real binary
-RUN touch src/main.rs src/lib.rs
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --bin txn
+# 3. Compile the actual release binary
+RUN cargo build --release --bin txn
 
-# Stage 2: Minimal runtime image (~60MB)
+# ==========================================
+# Stage 2: Minimal Non-Root Runtime (~40MB)
+# ==========================================
 FROM debian:bookworm-slim AS runner
 
 WORKDIR /app
 
+# Install only curl for container healthchecks & CA certificates for outbound HTTPS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl3 \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 -s /sbin/nologin appuser
 
-# Copy compiled executable
+# Copy binary from builder
 COPY --from=builder /app/target/release/txn /usr/local/bin/txn
 
-# Copy migrations so binary or scripts can apply them
-COPY migrations ./migrations
+# Run unprivileged
+USER appuser
 
 EXPOSE 8000
 

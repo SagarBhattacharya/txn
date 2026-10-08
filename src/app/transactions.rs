@@ -1,27 +1,36 @@
-use axum::{
-  Json,
-  extract::{Path, State},
-  http::StatusCode,
-};
-use serde::Serialize;
+use axum::{extract::{Path, State}, http::StatusCode, Json, Router};
+use axum::routing::post;
+use serde::{Deserialize, Serialize};
 
-use crate::app::auth::AuthUser;
-use crate::app::{AppJson, AppState};
+use crate::app::{transactions, AppJson, AppState};
+use crate::core::auth::AuthUser;
 use crate::core::errors::AppResult;
 use crate::core::ledger;
 use crate::core::types::{IdempotencyKey, Note, ReverseCmd, TransferCmd};
 
+// -------------- MODELS ----------------
+
 #[derive(Serialize)]
-pub struct TransactionResponse {
-  pub transaction_id: i32,
+struct TransactionResponse {
+  transaction_id: i32,
 }
 
-#[derive(serde::Deserialize)]
-pub struct ReversalPayload {
-  pub reason: Note,
+#[derive(Deserialize)]
+struct ReversalPayload {
+  reason: Note,
 }
 
-pub async fn transfer(
+// --------------- ROUTER ----------------
+
+pub fn router() -> Router<AppState> {
+  Router::new()
+    .route("/", post(transfer))
+    .route("/{id}/reverse", post(reverse))
+}
+
+// ---------------- ROUTES ------------------
+
+async fn transfer(
   user: AuthUser,
   key: IdempotencyKey,
   State(state): State<AppState>,
@@ -34,7 +43,7 @@ pub async fn transfer(
   ))
 }
 
-pub async fn reverse(
+async fn reverse(
   user: AuthUser,
   key: IdempotencyKey,
   Path(target): Path<i32>,

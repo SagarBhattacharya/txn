@@ -7,10 +7,7 @@ use sqlx::{FromRow, Type};
 #[sqlx(type_name = "account_type", rename_all = "lowercase")]
 pub enum AccountType {
   Asset,
-  Liability,
   Equity,
-  Revenue,
-  Expense,
 }
 
 impl AccountType {
@@ -19,7 +16,7 @@ impl AccountType {
   }
 }
 
-#[derive(Debug, FromRow, PartialEq)]
+#[derive(Debug, FromRow, PartialEq, Clone)]
 pub struct User {
   pub id: i32,
   pub username: String,
@@ -41,7 +38,7 @@ pub struct Transaction {
   pub id: i32,
   pub user_id: i32,
   pub description: String,
-  pub idempotency_key: Option<String>,
+  pub idempotency_key: String,
   pub request_hash: Vec<u8>,
   pub reversed_transaction_id: Option<i32>,
   pub created_at: DateTime<Utc>,

@@ -127,3 +127,119 @@ pub async fn auth_middleware(
 
   Ok(next.run(req).await)
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use chrono::{Duration, Utc};
+
+  fn test_user(password_hash: String) -> User {
+    User {
+      id: 42,
+      username: "alice".to_string(),
+      password_hash,
+      created_at: Utc::now(),
+    }
+  }
+
+  #[test]
+  fn test_jwt_issue_and_verify_cycle() {
+    let keys = JwtKeys::new("super-secure-secret-key-at-least-32-bytes-long");
+    let user_id = 101;
+
+    let token = keys.issue(user_id).expect("issuing JWT should succeed");
+    let claims = keys.verify(&token).expect("verifying valid JWT should succeed");
+
+    assert_eq!(claims.sub, user_id);
+    assert!(claims.exp > claims.iat);
+  }
+
+  #[test]
+  fn test_jwt_rejects_wrong_secret() {
+    let keys_signer = JwtKeys::new("signing-secret-key-at-least-32-bytes-long");
+    let keys_verifier = JwtKeys::new("different-secret-key-at-least-32-bytes-long");
+
+    let token = keys_signer.issue(101).expect("issuing token should succeed");
+    let result = keys_verifier.verify(&token);
+
+    assert!(matches!(result, Err(Error::Unauthorized(_))));
+  }
+
+  #[test]
+  fn test_jwt_rejects_expired_token() {
+    let secret = "test-secret-key-at-least-32-bytes-long";
+    let keys = JwtKeys::new(secret);
+
+    // Manually construct an expired token
+    let now = (Utc::now() - Duration::hours(48)).timestamp() as usize;
+    let expired_claims = Claims {
+      sub: 101,
+      iat: now - 3600,
+      exp: now,
+    };
+
+    let token = jsonwebtoken::encode(
+      &Header::default(),
+      &expired_claims,
+      &EncodingKey::from_secret(secret.as_bytes()),
+    )
+      .expect("encoding expired token should succeed");
+
+    let result = keys.verify(&token);
+    assert!(matches!(result, Err(Error::Unauthorized(_))));
+  }
+
+  #[test]
+  fn test_password_hash_and_verify_login_success() {
+    let password = "correct_horse_battery_staple";
+    let hash = hash_password(password).expect("hashing password should succeed");
+    let user = test_user(hash);
+
+    let auth_success = verify_login(Some(&user), password).expect("verify should succeed");
+    assert!(auth_success);
+  }
+
+  #[test]
+  fn test_verify_login_wrong_password() {
+    let hash = hash_password("valid_password").expect("hashing should succeed");
+    let user = test_user(hash);
+
+    let auth_failed = verify_login(Some(&user), "wrong_password").expect("verify should execute");
+    assert!(!auth_failed);
+  }
+
+  #[test]
+  fn test_verify_login_user_not_found_runs_dummy_hash() {
+    // Exercises the DUMMY_HASH branch to protect against timing attacks
+    let auth_failed = verify_login(None, "some_attempted_password").expect("verify should execute");
+    assert!(!auth_failed);
+  }
+
+  #[tokio::test]
+  async fn test_auth_user_extractor_success() {
+    let mut req = axum::http::Request::builder()
+      .body(())
+      .expect("request build");
+
+    req.extensions_mut().insert(AuthUser { id: 777 });
+
+    let (mut parts, _) = req.into_parts();
+    let auth_user = AuthUser::from_request_parts(&mut parts, &())
+      .await
+      .expect("extractor should succeed when extension is present");
+
+    assert_eq!(auth_user.id, 777);
+  }
+
+  #[tokio::test]
+  async fn test_auth_user_extractor_missing() {
+    let req = axum::http::Request::builder()
+      .body(())
+      .expect("request build");
+
+    let (mut parts, _) = req.into_parts();
+    let result = AuthUser::from_request_parts(&mut parts, &()).await;
+
+    assert!(matches!(result, Err(Error::Unauthorized(_))));
+  }
+}

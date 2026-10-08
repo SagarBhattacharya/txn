@@ -1,10 +1,12 @@
-use crate::core::config::Config;
 use crate::core::errors::AppResult;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-pub mod queries;
+mod queries;
 pub mod rows;
+
+pub use queries::*;
+use crate::core::Config;
 
 pub async fn connect(config: &Config) -> AppResult<PgPool> {
   let pool = PgPoolOptions::new()

@@ -1,6 +1,9 @@
 target/
 .git/
-.env
+*.env.*
 *.zip
 *.tar.gz
 .idea/
+*.md
+tests/
+bench/
