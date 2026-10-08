@@ -17,7 +17,7 @@
 
 A transaction is represented by immutable ledger entries whose amounts must sum to zero. Account balances are derived from those entries rather than stored separately.
 
-![txn screenshot](docs/screenshot.png)
+![txn dashboard](docs/screenshots/dashboard.png)
 
 ## Run
 
@@ -134,27 +134,27 @@ Authorization: Bearer <token>
 
 ### Users
 
-| Method | Endpoint | Description |
-|---|---|---|
+| Method | Endpoint          | Description                       |
+|--------|-------------------|-----------------------------------|
 | `POST` | `/users/register` | Register a user and receive a JWT |
-| `POST` | `/users/login` | Authenticate and receive a JWT |
+| `POST` | `/users/login`    | Authenticate and receive a JWT    |
 
 ### Accounts
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/accounts` | Create an account |
-| `GET` | `/accounts` | List the user's accounts |
-| `GET` | `/accounts/:id` | Get an account |
-| `GET` | `/accounts/:id/balance` | Calculate the current balance |
-| `GET` | `/accounts/:id/transactions` | Get account history |
+| Method | Endpoint                     | Description                   |
+|--------|------------------------------|-------------------------------|
+| `POST` | `/accounts`                  | Create an account             |
+| `GET`  | `/accounts`                  | List the user's accounts      |
+| `GET`  | `/accounts/:id`              | Get an account                |
+| `GET`  | `/accounts/:id/balance`      | Calculate the current balance |
+| `GET`  | `/accounts/:id/transactions` | Get account history           |
 
 ### Transactions
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/transactions` | Create a two-leg transfer |
-| `POST` | `/transactions/:id/reverse` | Reverse a transaction |
+| Method | Endpoint                    | Description               |
+|--------|-----------------------------|---------------------------|
+| `POST` | `/transactions`             | Create a two-leg transfer |
+| `POST` | `/transactions/:id/reverse` | Reverse a transaction     |
 
 Financial mutation requests require an `Idempotency-Key`.
 
@@ -173,15 +173,30 @@ curl -X POST http://localhost:8000/transactions \
   }'
 ```
 
-Reusing the same key with the same request returns the existing transaction instead of creating another one. Reusing the key with a different request is rejected.
-
 ## Architecture
 
-> **Architecture documentation coming soon.**
->
-> `docs/ARCH.md` will contain the detailed architecture, data model, transaction and reversal flows, locking strategy, design decisions, and scale considerations.
+`txn` uses PostgreSQL as the consistency boundary for financial operations.
 
-See [`docs/ARCH.md`](docs/ARCH.md).
+Transfers and reversals execute inside database transactions and use:
+
+- idempotency advisory locks
+- ordered `FOR UPDATE` account locks
+- target-transaction locking for reversals
+- database constraints for uniqueness and immutability
+- immutable ledger entries with derived balances
+
+The domain model represents transactions as one or more balanced entries:
+
+```text
+Transaction
+    └── Entries
+          ├── account
+          └── amount
+```
+
+Every transaction must sum to zero, and reversals create new inverse transactions rather than modifying historical records.
+
+See [`docs/ARCH.md`](docs/ARCH.md) for the data model, transaction flows, locking strategy, design decisions, and scale considerations.
 
 ## Benchmarks
 
@@ -196,14 +211,14 @@ The project includes benchmarks for:
 
 Selected `v0.1.0` results:
 
-| Benchmark | Result |
-|---|---:|
-| Transfer | 1,725 req/s |
-| Hot-account contention | 187 req/s |
-| Independent reversal | 1,136 req/s |
-| Idempotency replay | 962 req/s |
-| Balance reads | 5,554 → 272 req/s |
-| History reads | 2,217 → 318 req/s |
+| Benchmark              |            Result |
+|------------------------|------------------:|
+| Transfer               |       1,725 req/s |
+| Hot-account contention |         187 req/s |
+| Independent reversal   |       1,136 req/s |
+| Idempotency replay     |         962 req/s |
+| Balance reads          | 5,554 → 272 req/s |
+| History reads          | 2,217 → 318 req/s |
 
 All benchmark runs preserved the ledger's zero-sum invariant and completed without unexpected server or transport errors.
 

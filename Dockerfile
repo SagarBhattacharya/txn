@@ -5,22 +5,26 @@ FROM rust:1.99-slim-bookworm AS builder
 
 WORKDIR /app
 
-# 1. Cache dependency build
 COPY Cargo.toml Cargo.lock ./
 COPY benches ./benches
 
-RUN mkdir -p src \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    mkdir -p src \
     && echo "fn main() {}" > src/main.rs \
     && cargo build --release --bin txn \
     && rm -rf src target/release/deps/txn* target/release/txn*
 
-# 2. Copy source, migrations (for sqlx::migrate!), and static assets
 COPY migrations ./migrations
 COPY static ./static
 COPY src ./src
 
-# 3. Compile the actual release binary
-RUN cargo build --release --bin txn
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --bin txn \
+    && cp target/release/txn /tmp/txn
 
 # ==========================================
 # Stage 2: Minimal Non-Root Runtime (~40MB)
@@ -29,17 +33,14 @@ FROM debian:bookworm-slim AS runner
 
 WORKDIR /app
 
-# Install only curl for container healthchecks & CA certificates for outbound HTTPS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 -s /sbin/nologin appuser
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/txn /usr/local/bin/txn
+COPY --from=builder /tmp/txn /usr/local/bin/txn
 
-# Run unprivileged
 USER appuser
 
 EXPOSE 8000
