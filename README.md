@@ -1,6 +1,7 @@
 # txn
 
 ![CI](https://github.com/SagarBhattacharya/txn/actions/workflows/ci.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/SagarBhattacharya/txn)
 
 **A small, correctness-first double-entry ledger API built with Rust and PostgreSQL.**
 
