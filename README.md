@@ -3,20 +3,17 @@
 ![CI](https://github.com/SagarBhattacharya/txn/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/SagarBhattacharya/txn)
 
-**A small, correctness-first double-entry ledger API built with Rust and PostgreSQL.**
+**A correctness-first double-entry ledger API built with Rust and PostgreSQL.**
 
 `txn` is an experimental financial ledger focused on the engineering problems behind transactional systems:
 
 - double-entry accounting
 - immutable financial records
-- transactional concurrency
-- idempotent financial mutations
+- concurrency control
+- idempotent mutations
 - safe reversals
 - derived balances
 - PostgreSQL locking
-- authentication and observability
-
-A transaction is represented by immutable ledger entries whose amounts must sum to zero. Account balances are derived from those entries rather than stored separately.
 
 ![txn dashboard](docs/screenshots/dashboard.png)
 
@@ -24,36 +21,36 @@ A transaction is represented by immutable ledger entries whose amounts must sum 
 
 ### Requirements
 
-- Podman or Docker
+- Docker or Podman
 - Compose
 
-Start the application:
+Start the full stack:
 
 ```bash
 podman compose up -d --build
 ```
 
-The API and web UI are available at:
+Open the web UI:
 
 ```text
 http://localhost:8000
 ```
 
-Check the service:
+Check readiness:
 
 ```bash
 curl http://localhost:8000/health/ready
 ```
 
-Stop the stack:
+Stop:
 
 ```bash
 podman compose down
 ```
 
-## Try it in 60 seconds
+## Try it
 
-### 1. Register a user
+Register a user:
 
 ```bash
 TOKEN=$(
@@ -63,11 +60,11 @@ TOKEN=$(
       "username": "alice",
       "password": "password1234"
     }' |
-    jq -r '.token'
+  jq -r '.token'
 )
 ```
 
-### 2. Create an Equity account
+Create two accounts:
 
 ```bash
 EQUITY_ID=$(
@@ -78,13 +75,9 @@ EQUITY_ID=$(
       "name": "Opening Equity",
       "account_type": "Equity"
     }' |
-    jq -r '.id'
+  jq -r '.id'
 )
-```
 
-### 3. Create an Asset account
-
-```bash
 ASSET_ID=$(
   curl -s http://localhost:8000/accounts \
     -H "Authorization: Bearer $TOKEN" \
@@ -93,17 +86,14 @@ ASSET_ID=$(
       "name": "Cash",
       "account_type": "Asset"
     }' |
-    jq -r '.id'
+  jq -r '.id'
 )
 ```
 
-### 4. Fund the Asset account
-
-Send money from the Equity account to the Asset account:
+Fund the asset account:
 
 ```bash
-curl -s http://localhost:8000/transactions \
-  -X POST \
+curl -X POST http://localhost:8000/transactions \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: opening-funding-001' \
@@ -115,9 +105,7 @@ curl -s http://localhost:8000/transactions \
   }"
 ```
 
-The resulting Asset account now has a balance of `1000.00`.
-
-Check it:
+Check the balance:
 
 ```bash
 curl -s \
@@ -127,7 +115,7 @@ curl -s \
 
 ## API
 
-All authenticated endpoints use:
+Authenticated endpoints use:
 
 ```text
 Authorization: Bearer <token>
@@ -135,78 +123,76 @@ Authorization: Bearer <token>
 
 ### Users
 
-| Method | Endpoint          | Description                       |
-|--------|-------------------|-----------------------------------|
-| `POST` | `/users/register` | Register a user and receive a JWT |
-| `POST` | `/users/login`    | Authenticate and receive a JWT    |
+| Method | Endpoint          | Description                    |
+|--------|-------------------|--------------------------------|
+| `POST` | `/users/register` | Register and receive a JWT     |
+| `POST` | `/users/login`    | Authenticate and receive a JWT |
 
 ### Accounts
 
-| Method | Endpoint                     | Description                   |
-|--------|------------------------------|-------------------------------|
-| `POST` | `/accounts`                  | Create an account             |
-| `GET`  | `/accounts`                  | List the user's accounts      |
-| `GET`  | `/accounts/:id`              | Get an account                |
-| `GET`  | `/accounts/:id/balance`      | Calculate the current balance |
-| `GET`  | `/accounts/:id/transactions` | Get account history           |
+| Method | Endpoint                     | Description               |
+|--------|------------------------------|---------------------------|
+| `POST` | `/accounts`                  | Create an account         |
+| `GET`  | `/accounts`                  | List accounts             |
+| `GET`  | `/accounts/:id`              | Get an account            |
+| `GET`  | `/accounts/:id/balance`      | Calculate current balance |
+| `GET`  | `/accounts/:id/transactions` | Get account history       |
 
 ### Transactions
 
-| Method | Endpoint                    | Description               |
-|--------|-----------------------------|---------------------------|
-| `POST` | `/transactions`             | Create a two-leg transfer |
-| `POST` | `/transactions/:id/reverse` | Reverse a transaction     |
+| Method | Endpoint                    | Description           |
+|--------|-----------------------------|-----------------------|
+| `POST` | `/transactions`             | Create a transfer     |
+| `POST` | `/transactions/:id/reverse` | Reverse a transaction |
 
-Financial mutation requests require an `Idempotency-Key`.
+Financial mutations require an `Idempotency-Key`.
 
-Example transfer:
+## Design
 
-```bash
-curl -X POST http://localhost:8000/transactions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: payment-001" \
-  -d '{
-    "source_account_id": 1,
-    "destination_account_id": 2,
-    "amount": "25.00",
-    "description": "Payment"
-  }'
-```
+PostgreSQL is the consistency boundary for financial operations.
 
-## Architecture
-
-`txn` uses PostgreSQL as the consistency boundary for financial operations.
-
-Transfers and reversals execute inside database transactions and use:
-
-- idempotency advisory locks
-- ordered `FOR UPDATE` account locks
-- target-transaction locking for reversals
-- database constraints for uniqueness and immutability
-- immutable ledger entries with derived balances
-
-The domain model represents transactions as one or more balanced entries:
+Every transaction contains balanced ledger entries:
 
 ```text
 Transaction
-    └── Entries
-          ├── account
-          └── amount
+└── Entries
+    ├── account
+    └── amount
 ```
 
-Every transaction must sum to zero, and reversals create new inverse transactions rather than modifying historical records.
+The core rules are simple:
 
-See [`docs/ARCH.md`](docs/ARCH.md) for the data model, transaction flows, locking strategy, design decisions, and scale considerations.
+- every transaction must sum to zero
+- entries and transactions are immutable
+- balances are derived from ledger entries
+- reversals create new inverse transactions
+- concurrent mutations lock affected accounts in a deterministic order
+- repeated requests with the same idempotency key are serialized and replayed safely
+
+The implementation uses PostgreSQL transactions, advisory locks, `SELECT ... FOR UPDATE`, database constraints, and immutable ledger records.
+
+See [`docs/ARCH.md`](docs/ARCH.md) for the full data model, transaction flows, locking strategy, invariants, rejected alternatives, and scaling considerations.
+
+## Container Image
+
+The API image is published to GitHub Container Registry:
+
+```text
+ghcr.io/sagarbhattacharya/txn:v0.1.0
+```
+
+The image runs the `txn` API server and requires a PostgreSQL database plus the required environment variables.
+
+For local development, the Compose setup is the easiest way to run the complete stack.
 
 ## Benchmarks
 
-The project includes benchmarks for:
+`txn` includes a dedicated HTTP benchmark suite covering:
 
-- baseline transfer throughput
+- transfer throughput
 - hot-account contention
 - idempotency replay and concurrent races
-- reversal throughput and concurrent reversal races
+- reversal throughput and concurrent races
 - balance reads as ledger history grows
 - account-history reads as ledger history grows
 
@@ -221,64 +207,48 @@ Selected `v0.1.0` results:
 | Balance reads          | 5,554 → 272 req/s |
 | History reads          | 2,217 → 318 req/s |
 
-All benchmark runs preserved the ledger's zero-sum invariant and completed without unexpected server or transport errors.
+All runs preserved the zero-sum ledger invariant and completed without unexpected server or transport errors.
 
-See [`docs/BENCHES.md`](docs/BENCHES.md) for the environment, methodology, workload definitions, and complete results.
+Full methodology and results: [`docs/BENCHES.md`](docs/BENCHES.md)
 
-## Benchmarking locally
-
-The benchmark suite uses a separate PostgreSQL database and benchmark application service so benchmark data does not mix with normal development data.
-
-Start the benchmark environment:
+Run the benchmark environment:
 
 ```bash
 podman compose --profile bench up -d --build
 ```
 
-Run an individual benchmark:
+Run a benchmark:
 
 ```bash
 ./scripts/run-bench.sh transfer
 ```
 
-Other available benchmarks:
-
-```bash
-./scripts/run-bench.sh contention
-./scripts/run-bench.sh idempotency
-./scripts/run-bench.sh reversal
-./scripts/run-bench.sh reads
-./scripts/run-bench.sh history
-```
-
-`run-bench.sh` resets the benchmark database before each run.
-
-## Project structure
+Available benchmarks:
 
 ```text
-txn/
-├── src/
-├── benches/
-│   ├── common/
-│   ├── transfer.rs
-│   ├── contention.rs
-│   ├── idempotency.rs
-│   ├── reversal.rs
-│   ├── reads.rs
-│   └── history.rs
-├── docs/
-│   ├── ARCH.md
-│   └── BENCHES.md
-├── scripts/
-├── migrations/
-├── static/
-├── compose.yaml
-├── Dockerfile
-└── Cargo.toml
+transfer
+contention
+idempotency
+reversal
+reads
+history
+```
+
+## Repository
+
+```text
+src/            Application and domain code
+benches/        HTTP benchmark suite
+docs/           Architecture and benchmark documentation
+scripts/        Development and benchmark scripts
+migrations/     PostgreSQL migrations
+static/         Web UI
+compose.yaml    Development and benchmark environments
+Dockerfile      Container image
 ```
 
 ## Status
 
-`txn` is a `v0.1.0` project focused on correctness-first ledger mechanics rather than production banking infrastructure.
+`txn` is a `v0.1.0` experimental project focused on ledger correctness and transactional behavior, not production banking infrastructure.
 
-Known limitations and future work are documented in the architecture and benchmark documentation.
+Known limitations and future work are documented in [`docs/ARCH.md`](docs/ARCH.md).
